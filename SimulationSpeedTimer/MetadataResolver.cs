@@ -55,7 +55,7 @@ namespace SimulationSpeedTimer
         {
             string tableName = null;
             string columnName = null;
-            string timeColumnName = null;
+            string timeColumnName = "s_time"; // 시간 컬럼은 's_time'으로 고정
 
             // 1. Object_Info에서 table_name 조회
             using (var cmd = connection.CreateCommand())
@@ -78,29 +78,35 @@ namespace SimulationSpeedTimer
             }
 
             // 2. Column_Info에서 데이터 컬럼명 조회
-            using (var cmd = connection.CreateCommand())
+            // 예외 처리: 속성명이 's_time'인 경우 메타데이터 조회 없이 바로 사용
+            if (attributeName.Equals("s_time", StringComparison.OrdinalIgnoreCase) ||
+                attributeName.Equals("time", StringComparison.OrdinalIgnoreCase))
             {
-                cmd.CommandText = @"
-                    SELECT column_name 
-                    FROM Column_Info 
-                    WHERE table_name = @tableName 
-                      AND attribute_name = @attributeName
-                    LIMIT 1";
-                cmd.Parameters.AddWithValue("@tableName", tableName);
-                cmd.Parameters.AddWithValue("@attributeName", attributeName);
-
-                var result = cmd.ExecuteScalar();
-                if (result == null)
-                {
-                    throw new InvalidOperationException(
-                        $"Column_Info에서 table_name='{tableName}', attribute_name='{attributeName}'을 찾을 수 없습니다.");
-                }
-
-                columnName = result.ToString();
+                columnName = "s_time";
             }
+            else
+            {
+                using (var cmd = connection.CreateCommand())
+                {
+                    cmd.CommandText = @"
+                        SELECT column_name 
+                        FROM Column_Info 
+                        WHERE table_name = @tableName 
+                          AND attribute_name = @attributeName
+                        LIMIT 1";
+                    cmd.Parameters.AddWithValue("@tableName", tableName);
+                    cmd.Parameters.AddWithValue("@attributeName", attributeName);
 
-            // 3. 시간 컬럼명 (모든 테이블에서 's_time'으로 고정)
-            timeColumnName = "s_time";
+                    var result = cmd.ExecuteScalar();
+                    if (result == null)
+                    {
+                        throw new InvalidOperationException(
+                            $"Column_Info에서 table_name='{tableName}', attribute_name='{attributeName}'을 찾을 수 없습니다.");
+                    }
+
+                    columnName = result.ToString();
+                }
+            }
 
             return (tableName, columnName, timeColumnName);
         }
