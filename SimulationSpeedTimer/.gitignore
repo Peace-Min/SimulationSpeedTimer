@@ -1,0 +1,13 @@
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Build results
+[Bb]in/
+[Oo]bj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo

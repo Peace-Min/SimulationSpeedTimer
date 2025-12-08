@@ -1,5 +1,4 @@
-using Microsoft.Data.Sqlite;
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Data.SQLite;
 using System.Threading;
@@ -8,72 +7,79 @@ using System.Threading.Tasks;
 namespace SimulationSpeedTimer
 {
     /// <summary>
-    /// DB 조회를 위한 정적 서비스
-    /// 타이머 Tick에서 시간 정보를 큐에 인큐하면, 백그라운드 워커가 디큐하여 DB 조회를 수행합니다.
-    /// SQLite WAL 모드 최적화: 연결 재사용 방식
+    /// DB 조회를 위한 서비스 (인스턴스)
+    /// 각 차트마다 하나의 인스턴스를 생성하여 독립적인 연결과 쿼리를 관리합니다.
+    /// SQLite WAL 모드에서는 여러 연결이 동시에 읽기(SELECT)를 수행해도 안전합니다.
     /// </summary>
-    public static class DatabaseQueryService
+    public class DatabaseQueryService : IDisposable
     {
-        private static ConcurrentQueue<TimeSpan> _queryQueue = new ConcurrentQueue<TimeSpan>();
-        private static Task _workerTask;
-        private static CancellationTokenSource _cts;
-        private static bool _isRunning = false;
-        private static DatabaseQueryConfig _config;
-        private static SqliteConnection _connection;
+        private ConcurrentQueue<TimeSpan> _queryQueue = new ConcurrentQueue<TimeSpan>();
+        private Task _workerTask;
+        private CancellationTokenSource _cts;
+        private bool _isRunning = false;
+        private DatabaseQueryConfig _config;
+        private SQLiteConnection _connection;
+        private ResolvedQueryInfo _resolvedQuery; // 메타데이터 해석 결과 캐싱
+        
+        /// <summary>
+        /// 서비스 식별자 (예: "Chart1", "MissileTracker")
+        /// </summary>
+        public string ServiceId { get; private set; }
 
         /// <summary>
         /// DB 조회 결과를 전달하는 이벤트
-        /// 매개변수: ChartDataPoint (X, Y 값)
+        /// 매개변수: (ServiceId, ChartDataPoint)
         /// </summary>
-        public static event Action<ChartDataPoint> OnDataQueried;
-
-        /// <summary>
-        /// 시뮬레이션 종료 감지 이벤트
-        /// 재시도 횟수를 초과하여 데이터를 찾지 못한 경우 발생
-        /// 매개변수: (실패한 시간, 재시도 횟수)
-        /// </summary>
-        public static event Action<TimeSpan, int> OnSimulationEnded;
+        public event Action<string, ChartDataPoint> OnDataQueried;
 
         /// <summary>
         /// 서비스 실행 상태
         /// </summary>
-        public static bool IsRunning => _isRunning;
+        public bool IsRunning => _isRunning;
 
         /// <summary>
         /// 현재 큐에 대기 중인 조회 요청 수
         /// </summary>
-        public static int QueueCount => _queryQueue.Count;
+        public int QueueCount => _queryQueue.Count;
+
+        /// <summary>
+        /// 생성자
+        /// </summary>
+        /// <param name="serviceId">서비스 식별자</param>
+        /// <param name="config">DB 조회 설정</param>
+        public DatabaseQueryService(string serviceId, DatabaseQueryConfig config)
+        {
+            ServiceId = serviceId;
+            _config = config ?? throw new ArgumentNullException(nameof(config));
+        }
 
         /// <summary>
         /// DB 조회 서비스 시작
         /// </summary>
-        /// <param name="config">DB 조회 설정 정보</param>
-        public static void Start(DatabaseQueryConfig config)
+        public void Start()
         {
             if (_isRunning) return;
 
-            _config = config ?? throw new ArgumentNullException(nameof(config));
-
-            // 설정 유효성 검証
+            // 설정 유효성 검증
             if (string.IsNullOrWhiteSpace(_config.DatabasePath))
-                throw new ArgumentException("DatabasePath is required", nameof(config));
-            if (string.IsNullOrWhiteSpace(_config.TableName))
-                throw new ArgumentException("TableName is required", nameof(config));
-            if (string.IsNullOrWhiteSpace(_config.XAxisColumnName))
-                throw new ArgumentException("XAxisColumnName is required", nameof(config));
-            if (string.IsNullOrWhiteSpace(_config.YAxisColumnName))
-                throw new ArgumentException("YAxisColumnName is required", nameof(config));
+                throw new ArgumentException("DatabasePath is required", nameof(_config));
+            if (string.IsNullOrWhiteSpace(_config.XAxisObjectName))
+                throw new ArgumentException("XAxisObjectName is required", nameof(_config));
+            if (string.IsNullOrWhiteSpace(_config.XAxisAttributeName))
+                throw new ArgumentException("XAxisAttributeName is required", nameof(_config));
+            if (string.IsNullOrWhiteSpace(_config.YAxisObjectName))
+                throw new ArgumentException("YAxisObjectName is required", nameof(_config));
+            if (string.IsNullOrWhiteSpace(_config.YAxisAttributeName))
+                throw new ArgumentException("YAxisAttributeName is required", nameof(_config));
 
             // SQLite 연결 생성 (WAL 모드 최적화)
-            var connectionString = new SqliteConnectionStringBuilder
+            var connectionString = new SQLiteConnectionStringBuilder
             {
                 DataSource = _config.DatabasePath,
-                //Read = true,           // Read 전용
                 Pooling = false,           // SQLite는 풀링 불필요
-                //JournalMode = SQLiteJournalModeEnum.Wal  // WAL 모드 명시
             }.ToString();
 
-            _connection = new SqliteConnection(connectionString);
+            _connection = new SQLiteConnection(connectionString);
             _connection.Open();
 
             // WAL 모드 확인
@@ -81,13 +87,16 @@ namespace SimulationSpeedTimer
             {
                 cmd.CommandText = "PRAGMA journal_mode;";
                 var mode = cmd.ExecuteScalar()?.ToString();
-                Console.WriteLine($"[DB] Journal Mode: {mode}");
-
+                
                 if (mode?.ToLower() != "wal")
                 {
-                    Console.WriteLine("[경고] WAL 모드가 아닙니다. 성능 저하 가능.");
+                    Console.WriteLine($"[{ServiceId}] [경고] WAL 모드가 아닙니다. 성능 저하 가능.");
                 }
             }
+
+            // 메타데이터 해석 (Object_Info, Column_Info에서 실제 테이블명/컬럼명 조회)
+            _resolvedQuery = MetadataResolver.Resolve(_config, _connection);
+            // Console.WriteLine($"[{ServiceId}] 메타데이터 해석 완료: {_resolvedQuery.XAxisTableName}.{_resolvedQuery.XAxisColumnName} vs {_resolvedQuery.YAxisTableName}.{_resolvedQuery.YAxisColumnName}");
 
             _isRunning = true;
             _cts = new CancellationTokenSource();
@@ -95,9 +104,9 @@ namespace SimulationSpeedTimer
         }
 
         /// <summary>
-        /// DB 조회 서비스 정지
+        /// DB 조회 서비스 정지 및 리소스 정리
         /// </summary>
-        public static void Stop()
+        public void Stop()
         {
             if (!_isRunning) return;
 
@@ -133,16 +142,22 @@ namespace SimulationSpeedTimer
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[DB] 연결 종료 중 오류: {ex.Message}");
+                Console.WriteLine($"[{ServiceId}] 연결 종료 중 오류: {ex.Message}");
             }
             _connection = null;
 
             // 큐 비우기
             while (_queryQueue.TryDequeue(out _)) { }
+        }
 
-            // 이벤트 핸들러 모두 제거 (메모리 누수 방지)
+        /// <summary>
+        /// IDisposable 구현
+        /// </summary>
+        public void Dispose()
+        {
+            Stop();
+            // 이벤트 핸들러 제거
             OnDataQueried = null;
-            OnSimulationEnded = null;
         }
 
         /// <summary>
@@ -150,7 +165,7 @@ namespace SimulationSpeedTimer
         /// 타이머 Tick 이벤트에서 호출됩니다.
         /// </summary>
         /// <param name="simulationTime">조회할 시뮬레이션 시간 (DB 기본키)</param>
-        public static void EnqueueQuery(TimeSpan simulationTime)
+        public void EnqueueQuery(TimeSpan simulationTime)
         {
             _queryQueue.Enqueue(simulationTime);
         }
@@ -159,7 +174,7 @@ namespace SimulationSpeedTimer
         /// 백그라운드 워커 루프
         /// 큐에서 시간 정보를 디큐하여 DB 조회를 수행합니다.
         /// </summary>
-        private static void WorkerLoop(CancellationToken token)
+        private void WorkerLoop(CancellationToken token)
         {
             try
             {
@@ -170,20 +185,12 @@ namespace SimulationSpeedTimer
                         // DB 조회 수행 (재시도 포함)
                         var chartData = QueryDatabaseWithRetry(simTime, token);
 
-                        // 조회 결과 이벤트 발생
+                        // 조회 결과 이벤트 발생 (데이터가 있을 때만)
                         if (chartData != null)
                         {
-                            OnDataQueried?.Invoke(chartData);
+                            OnDataQueried?.Invoke(ServiceId, chartData);
                         }
-                        else
-                        {
-                            // 재시도 실패 -> 시뮬레이션 종료로 판단
-                            OnSimulationEnded?.Invoke(simTime, _config.RetryCount);
-
-                            // 서비스 자동 정지 (선택사항)
-                            // Stop();
-                            // break;
-                        }
+                        // 데이터가 없으면(null) 그냥 무시하고 다음 시간 처리
                     }
                     else
                     {
@@ -198,7 +205,7 @@ namespace SimulationSpeedTimer
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error in DatabaseQueryService: {ex.Message}");
+                Console.WriteLine($"Error in DatabaseQueryService[{ServiceId}]: {ex.Message}");
             }
         }
 
@@ -209,7 +216,7 @@ namespace SimulationSpeedTimer
         /// <param name="simulationTime">조회할 시간</param>
         /// <param name="token">취소 토큰</param>
         /// <returns>조회된 차트 데이터 포인트 (실패 시 null)</returns>
-        private static ChartDataPoint QueryDatabaseWithRetry(TimeSpan simulationTime, CancellationToken token)
+        private ChartDataPoint QueryDatabaseWithRetry(TimeSpan simulationTime, CancellationToken token)
         {
             int attemptCount = 0;
             int maxAttempts = _config.RetryCount + 1; // 첫 시도 + 재시도 횟수
@@ -227,7 +234,7 @@ namespace SimulationSpeedTimer
                     if (attemptCount > 1)
                     {
                         // 재시도 후 성공한 경우 로그 출력 (선택사항)
-                        Console.WriteLine($"[DB Query] Success after {attemptCount} attempts for time {simulationTime.TotalSeconds:F2}s");
+                        // Console.WriteLine($"[{ServiceId}] Success after {attemptCount} attempts for time {simulationTime.TotalSeconds:F2}s");
                     }
                     return result;
                 }
@@ -240,7 +247,7 @@ namespace SimulationSpeedTimer
             }
 
             // 모든 재시도 실패
-            Console.WriteLine($"[DB Query] Failed after {attemptCount} attempts for time {simulationTime.TotalSeconds:F2}s - Simulation may have ended");
+            // Console.WriteLine($"[{ServiceId}] Failed after {attemptCount} attempts for time {simulationTime.TotalSeconds:F2}s");
             return null;
         }
 
@@ -249,46 +256,93 @@ namespace SimulationSpeedTimer
         /// </summary>
         /// <param name="simulationTime">조회할 시간 (기본키)</param>
         /// <returns>조회된 차트 데이터 포인트</returns>
-        private static ChartDataPoint QueryDatabase(TimeSpan simulationTime)
+        private ChartDataPoint QueryDatabase(TimeSpan simulationTime)
         {
-            // TimeSpan을 0.01초 단위 문자열로 변환 (예: "0.01", "0.02", "1.23")
-            string timeKey = simulationTime.TotalSeconds.ToString("F2");
+            // TimeSpan을 시간 값으로 변환 (s_time 컬럼과 매칭)
+            double timeValue = simulationTime.TotalSeconds;
 
-            // SQLite 연결 재사용 방식 (WAL 모드 최적화)
-            using (var command = _connection.CreateCommand())
+            if (_resolvedQuery.IsSameTable)
             {
-                command.CommandText =
-                    $"SELECT {_config.XAxisColumnName}, {_config.YAxisColumnName} " +
-                    $"FROM {_config.TableName} " +
-                    $"WHERE {_config.TimeColumnName} = @time";
-
-                command.Parameters.AddWithValue("@time", timeKey);
-
-                using (var reader = command.ExecuteReader())
+                // 같은 테이블: 단일 쿼리로 X, Y 동시 조회
+                using (var command = _connection.CreateCommand())
                 {
-                    if (reader.Read())
+                    command.CommandText =
+                        $"SELECT {_resolvedQuery.XAxisColumnName}, {_resolvedQuery.YAxisColumnName} " +
+                        $"FROM {_resolvedQuery.XAxisTableName} " +
+                        $"WHERE {_resolvedQuery.XAxisTimeColumnName} = @time";
+
+                    command.Parameters.AddWithValue("@time", timeValue);
+
+                    using (var reader = command.ExecuteReader())
                     {
-                        return new ChartDataPoint
+                        if (reader.Read())
                         {
-                            X = reader.GetDouble(0),
-                            Y = reader.GetDouble(1)
-                        };
+                            return new ChartDataPoint
+                            {
+                                X = Convert.ToDouble(reader.GetValue(0)),
+                                Y = Convert.ToDouble(reader.GetValue(1))
+                            };
+                        }
                     }
+                }
+            }
+            else
+            {
+                // 다른 테이블: 2개 쿼리로 X, Y 각각 조회
+                double? xValue = null;
+                double? yValue = null;
+
+                // X축 조회
+                using (var command = _connection.CreateCommand())
+                {
+                    command.CommandText =
+                        $"SELECT {_resolvedQuery.XAxisColumnName} " +
+                        $"FROM {_resolvedQuery.XAxisTableName} " +
+                        $"WHERE {_resolvedQuery.XAxisTimeColumnName} = @time";
+
+                    command.Parameters.AddWithValue("@time", timeValue);
+
+                    using (var reader = command.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            xValue = Convert.ToDouble(reader.GetValue(0));
+                        }
+                    }
+                }
+
+                // Y축 조회
+                using (var command = _connection.CreateCommand())
+                {
+                    command.CommandText =
+                        $"SELECT {_resolvedQuery.YAxisColumnName} " +
+                        $"FROM {_resolvedQuery.YAxisTableName} " +
+                        $"WHERE {_resolvedQuery.YAxisTimeColumnName} = @time";
+
+                    command.Parameters.AddWithValue("@time", timeValue);
+
+                    using (var reader = command.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            yValue = Convert.ToDouble(reader.GetValue(0));
+                        }
+                    }
+                }
+
+                // 둘 다 조회 성공한 경우에만 반환
+                if (xValue.HasValue && yValue.HasValue)
+                {
+                    return new ChartDataPoint
+                    {
+                        X = xValue.Value,
+                        Y = yValue.Value
+                    };
                 }
             }
 
             // 데이터 없음 (재시도 로직이 처리)
             return null;
-        }
-
-        /// <summary>
-        /// TimeSpan을 0.01초 단위 문자열로 변환
-        /// </summary>
-        /// <param name="time">변환할 시간</param>
-        /// <returns>0.01초 단위 문자열 (예: "0.01", "1.23")</returns>
-        private static string ConvertToTimeKey(TimeSpan time)
-        {
-            return time.TotalSeconds.ToString("F2");
         }
     }
 }

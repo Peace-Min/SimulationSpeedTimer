@@ -1,7 +1,8 @@
 namespace SimulationSpeedTimer
 {
     /// <summary>
-    /// DB 조회 설정 정보
+    /// DB 조회를 위한 메타데이터 설정
+    /// Object_Info, Column_Info 테이블에서 실제 테이블명/컬럼명을 조회하기 위한 정보만 포함
     /// </summary>
     public class DatabaseQueryConfig
     {
@@ -11,25 +12,24 @@ namespace SimulationSpeedTimer
         public string DatabasePath { get; set; }
 
         /// <summary>
-        /// 조회할 테이블명
+        /// X축 데이터의 Object 이름 (Object_Info.object_name)
         /// </summary>
-        public string TableName { get; set; }
+        public string XAxisObjectName { get; set; }
 
         /// <summary>
-        /// X축으로 사용할 컬럼명 (사용자 선택)
+        /// X축 데이터의 Attribute 이름 (Column_Info.attribute_name)
         /// </summary>
-        public string XAxisColumnName { get; set; }
+        public string XAxisAttributeName { get; set; }
 
         /// <summary>
-        /// Y축으로 사용할 컬럼명 (사용자 선택)
+        /// Y축 데이터의 Object 이름 (Object_Info.object_name)
         /// </summary>
-        public string YAxisColumnName { get; set; }
+        public string YAxisObjectName { get; set; }
 
         /// <summary>
-        /// 시간 컬럼명 (기본키, WHERE 조건에 사용)
-        /// 기본값: "Time"
+        /// Y축 데이터의 Attribute 이름 (Column_Info.attribute_name)
         /// </summary>
-        public string TimeColumnName { get; set; } = "Time";
+        public string YAxisAttributeName { get; set; }
 
         /// <summary>
         /// 데이터가 없을 때 재시도 횟수

@@ -1,96 +1,92 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading;
 
 namespace SimulationSpeedTimer
 {
     /// <summary>
-    /// DatabaseQueryService 메인 테스트 프로그램
+    /// SimulationController를 사용한 최종 테스트 프로그램
+    /// 기존 코드는 이처럼 Controller만 알면 됩니다.
     /// </summary>
     internal class MainTest
     {
         static void Main(string[] args)
         {
-            Console.WriteLine("=== DatabaseQueryService + SimulationTimer 테스트 ===\n");
+            Console.OutputEncoding = System.Text.Encoding.UTF8;
+            Console.WriteLine("=== 시뮬레이션 컨트롤러 테스트 (최종 구조) ===\n");
 
-            // Config 설정
-            var config = new DatabaseQueryConfig
+            string dbPath = @"c:\Users\CEO\source\repos\SimulationSpeedTimer\SimulationSpeedTimer\journal_0000001.db";
+
+            // 1. 컨트롤러 생성 (using으로 자동 정리)
+            using (var controller = new SimulationController())
             {
-                DatabasePath = @"C:\Data\simulation.db",  // SQLite DB 경로
-                TableName = "SimulationData",
-                XAxisColumnName = "Temperature",
-                YAxisColumnName = "Pressure",
-                TimeColumnName = "Time",
-                RetryCount = 3,
-                RetryIntervalMs = 50
-            };
-
-            int dataCount = 0;
-            int endCount = 0;
-
-            // 데이터 조회 성공 이벤트
-            DatabaseQueryService.OnDataQueried += (chartData) =>
-            {
-                dataCount++;
-                if (dataCount <= 10 || dataCount % 10 == 0)
+                // 2. 차트 설정 준비 (기존 코드에서 넘겨줄 데이터)
+                var configs = new List<(string, DatabaseQueryConfig)>
                 {
-                    Console.WriteLine($"[{dataCount}] Time: {SimulationTimer.CurrentTime.TotalSeconds:F2}s, " +
-                                    $"X: {chartData.X:F2}, Y: {chartData.Y:F2}");
-                }
-            };
+                    ("RadarChart", new DatabaseQueryConfig
+                    {
+                        DatabasePath = dbPath,
+                        XAxisObjectName = "ourDetectRadar", XAxisAttributeName = "distance",
+                        YAxisObjectName = "ourDetectRadar", YAxisAttributeName = "position.x"
+                    }),
+                    ("LauncherChart", new DatabaseQueryConfig
+                    {
+                        DatabasePath = dbPath,
+                        XAxisObjectName = "ourDetectRadar", XAxisAttributeName = "distance",
+                        YAxisObjectName = "ourLauncher", YAxisAttributeName = "missile_count"
+                    }),
+                    ("MissileChart", new DatabaseQueryConfig
+                    {
+                        DatabasePath = dbPath,
+                        XAxisObjectName = "ourMissile", XAxisAttributeName = "position.x",
+                        YAxisObjectName = "ourMissile", YAxisAttributeName = "position.y"
+                    })
+                };
 
-            // 시뮬레이션 종료 감지 이벤트
-            DatabaseQueryService.OnSimulationEnded += (failedTime, retryCount) =>
-            {
-                endCount++;
-                Console.WriteLine($"\n[시뮬레이션 종료 감지]");
-                Console.WriteLine($"  실패 시간: {failedTime.TotalSeconds:F2}초");
-                Console.WriteLine($"  재시도 횟수: {retryCount}회");
+                // 3. 컨트롤러 초기화
+                controller.Initialize(configs);
 
-                // 타이머 정지
-                SimulationTimer.Stop();
-                DatabaseQueryService.Stop();
-            };
-
-            // 타이머 Tick 이벤트
-            SimulationTimer.OnTick += (simTime) =>
-            {
-                DatabaseQueryService.EnqueueQuery(simTime);
-            };
-
-            try
-            {
-                Console.WriteLine("테스트용 데이터베이스 생성 중...\n");
-                //CreateTestDatabase.Create(config.DatabasePath, durationSeconds: 10.0);
-
-                Console.WriteLine("서비스 시작...");
-                Console.WriteLine($"설정: RetryCount={config.RetryCount}, Interval={config.RetryIntervalMs}ms\n");
-
-                DatabaseQueryService.Start(config);
-                SimulationTimer.Start(1.0);  // 1배속
-
-                Console.WriteLine("실행 중... (Enter 키를 누르면 종료)\n");
-                Console.ReadLine();
-
-                // 수동 종료
-                if (SimulationTimer.IsRunning)
+                // 4. UI 이벤트 연결 (데이터 수신 시 할 일)
+                controller.OnDataReceived += (chartId, data) =>
                 {
-                    Console.WriteLine("\n수동 종료 중...");
-                    SimulationTimer.Stop();
-                    DatabaseQueryService.Stop();
-                }
+                    // 로그 과다 출력 방지
+                    if (SimulationTimer.CurrentTime.TotalSeconds < 0.05)
+                    {
+                        Console.WriteLine($"[{chartId}] Time: {SimulationTimer.CurrentTime.TotalSeconds:F2}s -> ({data.X:F2}, {data.Y:F2})");
+                    }
+                };
 
-                Console.WriteLine($"\n=== 최종 결과 ===");
-                Console.WriteLine($"조회 성공: {dataCount}회");
-                Console.WriteLine($"종료 감지: {endCount}회");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"\n[오류] {ex.Message}");
-                Console.WriteLine(ex.StackTrace);
+                try
+                {
+                    // 5. 시뮬레이션 시작!
+                    Console.WriteLine("시뮬레이션 시작 (1배속)...");
+                    controller.Start(1.0);
+
+                    Console.WriteLine("\n실행 중... (Enter 키를 누르면 일시정지)\n");
+                    Console.ReadLine();
+
+                    // 6. 일시정지 테스트
+                    controller.Pause();
+                    Console.WriteLine("\n일시정지 됨. (Enter 키를 누르면 재개)\n");
+                    Console.ReadLine();
+
+                    // 7. 재개
+                    controller.Start(1.0);
+                    Console.WriteLine("\n재개 됨. (Enter 키를 누르면 종료)\n");
+                    Console.ReadLine();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"오류: {ex.Message}");
+                }
+                finally
+                {
+                    // 8. 종료 (using 블록을 벗어나면 Dispose가 호출되어 Stop도 자동 수행됨)
+                    Console.WriteLine("종료 처리 중...");
+                }
             }
 
-            Console.WriteLine("\n아무 키나 누르면 종료...");
-            Console.ReadKey();
+            Console.WriteLine("\n프로그램 종료.");
         }
     }
 }

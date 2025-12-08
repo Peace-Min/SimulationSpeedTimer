@@ -1,0 +1,338 @@
+[
+    {
+        "attribute_name": "deltaT",
+        "column_name": "COL0",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_0"
+    },
+    {
+        "attribute_name": "distance",
+        "column_name": "COL1",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_0"
+    },
+    {
+        "attribute_name": "orientation.phi",
+        "column_name": "COL10",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_0"
+    },
+    {
+        "attribute_name": "orientation.theta",
+        "column_name": "COL11",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_0"
+    },
+    {
+        "attribute_name": "orientation.psi",
+        "column_name": "COL12",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_0"
+    },
+    {
+        "attribute_name": "position.x",
+        "column_name": "COL13",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_0"
+    },
+    {
+        "attribute_name": "position.y",
+        "column_name": "COL14",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_0"
+    },
+    {
+        "attribute_name": "position.z",
+        "column_name": "COL15",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_0"
+    },
+    {
+        "attribute_name": "enemyOrientation.phi",
+        "column_name": "COL2",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_0"
+    },
+    {
+        "attribute_name": "enemyOrientation.theta",
+        "column_name": "COL3",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_0"
+    },
+    {
+        "attribute_name": "enemyOrientation.psi",
+        "column_name": "COL4",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_0"
+    },
+    {
+        "attribute_name": "enemyPosition.x",
+        "column_name": "COL5",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_0"
+    },
+    {
+        "attribute_name": "enemyPosition.y",
+        "column_name": "COL6",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_0"
+    },
+    {
+        "attribute_name": "enemyPosition.z",
+        "column_name": "COL7",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_0"
+    },
+    {
+        "attribute_name": "enemySpeed",
+        "column_name": "COL8",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_0"
+    },
+    {
+        "attribute_name": "lockon",
+        "column_name": "COL9",
+        "data_type": "INT16_TYPE",
+        "table_name": "Object_Table_0"
+    },
+    {
+        "attribute_name": "deltaT",
+        "column_name": "COL0",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "enemyOrientation.phi",
+        "column_name": "COL1",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "m_status",
+        "column_name": "COL10",
+        "data_type": "INT16_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "missile_count",
+        "column_name": "COL11",
+        "data_type": "UINT32_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "position.x",
+        "column_name": "COL12",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "position.y",
+        "column_name": "COL13",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "position.z",
+        "column_name": "COL14",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "positionC.x",
+        "column_name": "COL15",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "positionC.y",
+        "column_name": "COL16",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "positionC.z",
+        "column_name": "COL17",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "enemyOrientation.theta",
+        "column_name": "COL2",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "enemyOrientation.psi",
+        "column_name": "COL3",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "enemyPosition.x",
+        "column_name": "COL4",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "enemyPosition.y",
+        "column_name": "COL5",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "enemyPosition.z",
+        "column_name": "COL6",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "enemySpeed",
+        "column_name": "COL7",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "iLaunch",
+        "column_name": "COL8",
+        "data_type": "INT16_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "lockon",
+        "column_name": "COL9",
+        "data_type": "INT16_TYPE",
+        "table_name": "Object_Table_1"
+    },
+    {
+        "attribute_name": "dTime",
+        "column_name": "COL0",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "damageAssMode",
+        "column_name": "COL1",
+        "data_type": "INT16_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "fire",
+        "column_name": "COL10",
+        "data_type": "INT16_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "iLaunch",
+        "column_name": "COL11",
+        "data_type": "INT16_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "missileCount",
+        "column_name": "COL12",
+        "data_type": "UINT32_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "orientation.phi",
+        "column_name": "COL13",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "orientation.theta",
+        "column_name": "COL14",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "orientation.psi",
+        "column_name": "COL15",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "position.x",
+        "column_name": "COL16",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "position.y",
+        "column_name": "COL17",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "position.z",
+        "column_name": "COL18",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "positionC.x",
+        "column_name": "COL19",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "deltaT",
+        "column_name": "COL2",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "positionC.y",
+        "column_name": "COL20",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "positionC.z",
+        "column_name": "COL21",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "enemyOrientation.phi",
+        "column_name": "COL3",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "enemyOrientation.theta",
+        "column_name": "COL4",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "enemyOrientation.psi",
+        "column_name": "COL5",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "enemyPosition.x",
+        "column_name": "COL6",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "enemyPosition.y",
+        "column_name": "COL7",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "enemyPosition.z",
+        "column_name": "COL8",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    },
+    {
+        "attribute_name": "enemySpeed",
+        "column_name": "COL9",
+        "data_type": "DOUBLE_TYPE",
+        "table_name": "Object_Table_2"
+    }
+]
