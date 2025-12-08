@@ -5,6 +5,10 @@ using System.Threading.Tasks;
 
 namespace SimulationSpeedTimer
 {
+    /// <summary>
+    /// 시뮬레이션 타이머 (정적 클래스)
+    /// 10ms 간격으로 틱을 발생시키며, 배속 조절이 가능합니다.
+    /// </summary>
     public static class SimulationTimer
     {
         private static Stopwatch _stopwatch = new Stopwatch();
@@ -147,6 +151,9 @@ namespace SimulationSpeedTimer
             OnTick = null;
         }
 
+        /// <summary>
+        /// 틱 루프 - 10ms마다 OnTick 이벤트 발생
+        /// </summary>
         private static void TickLoop(CancellationToken token)
         {
             try
@@ -155,42 +162,15 @@ namespace SimulationSpeedTimer
                 {
                     TimeSpan current = CurrentTime;
 
-                    // Execute all pending ticks
-                    // 만약 시스템 부하로 인해 시간이 많이 지났다면, 빠진 틱을 모두 처리할지(Catch-up), 
-                    // 아니면 스킵할지는 선택사항이나, 시뮬레이션은 보통 순차 처리가 중요하므로 Catch-up으로 구현합니다.
-                    // 다만 무한루프 방지를 위해 한 번 루프당 처리 한도 등을 둘 수도 있습니다.
-
                     if (current >= _nextTick)
                     {
                         OnTick?.Invoke(_nextTick);
                         _nextTick += TimeSpan.FromMilliseconds(TickIntervalMs);
-
-                        // 틱 처리를 하고 나서도 시간이 남았다면 루프를 바로 다시 돕니다 (Spin)
-                        continue;
-                    }
-
-                    // 다음 틱까지 남은 시뮬레이션 시간
-                    TimeSpan simTimeUntilNextTick = _nextTick - current;
-
-                    if (simTimeUntilNextTick <= TimeSpan.Zero) continue;
-
-                    // 실제 대기해야 할 시간 계산 (시뮬레이션 시간 / 배속)
-                    double realWaitMs = simTimeUntilNextTick.TotalMilliseconds / _speedMultiplier;
-
-                    // 대기 시간이 너무 길면 Sleep으로 CPU 양보, 짧으면 SpinWait
-                    // 윈도우 기본 Timer resolution은 15ms 내외이므로 정밀 제어를 위해 
-                    // 15ms 이상 남았을 때만 Sleep 사용
-                    if (realWaitMs > 16)
-                    {
-                        // 약간 덜 자고 일어나서 SpinWait로 정밀도 맞춤
-                        Thread.Sleep((int)(realWaitMs - 5));
                     }
                     else
                     {
-                        // 짧은 시간은 스핀 대기 (busy wait) -> CPU 사용량은 높지만 정밀함
-                        // 하지만 너무 과도한 점유를 막기 위해 0일때는 yield
-                        if (realWaitMs > 1)
-                            Thread.SpinWait(100);
+                        // 다음 틱까지 대기 (1ms 간격으로 체크)
+                        Thread.Sleep(1);
                     }
                 }
             }

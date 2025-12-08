@@ -86,7 +86,6 @@
     <Compile Include="ChartDataPoint.cs" />
     <Compile Include="DatabaseQueryConfig.cs" />
     <Compile Include="DatabaseQueryService.cs" />
-    <Compile Include="SimulationQueryManager.cs" />
     <Compile Include="SimulationController.cs" />
     <Compile Include="MetadataResolver.cs" />
     <Compile Include="MetadataResolverTest.cs" />
