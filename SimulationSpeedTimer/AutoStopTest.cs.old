@@ -1,0 +1,107 @@
+using System;
+using System.Threading;
+
+namespace SimulationSpeedTimer
+{
+    /// <summary>
+    /// SimulationTimer의 자동 종료 기능 테스트
+    /// 실제 사용 시나리오: SW가 먼저 구동되고, SimulationEnd() 메소드에서 종료 시간을 설정
+    /// </summary>
+    public class AutoStopTest
+    {
+        // 시뮬레이션 엔진 SW를 시뮬레이션하는 클래스
+        private class SimulationEngineSW
+        {
+            private TimeSpan _actualOperatingTime;
+
+            public SimulationEngineSW(TimeSpan actualOperatingTime)
+            {
+                _actualOperatingTime = actualOperatingTime;
+            }
+
+            /// <summary>
+            /// SW가 종료될 때 호출되는 메소드
+            /// 이 메소드에서 SimulationTimer에 종료 시간을 설정합니다.
+            /// </summary>
+            public void SimulationEnd()
+            {
+                Console.WriteLine($"\n[SW] SimulationEnd() 호출됨 - 종료 시간: {_actualOperatingTime.TotalSeconds}초");
+                SimulationTimer.SetMaxSimulationTime(_actualOperatingTime);
+            }
+        }
+
+        public static void Main(string[] args)
+        {
+            Console.WriteLine("=== SimulationTimer 동적 종료 시간 설정 테스트 ===\n");
+
+            // 시뮬레이션 엔진 SW의 실제 운용시간: 15초
+            TimeSpan actualOperatingTime = TimeSpan.FromSeconds(15);
+
+            Console.WriteLine($"시나리오:");
+            Console.WriteLine($"1. 타이머를 먼저 시작 (종료 시간 미설정)");
+            Console.WriteLine($"2. SW가 구동되고 3초 후 SimulationEnd() 호출");
+            Console.WriteLine($"3. SimulationEnd()에서 종료 시간 {actualOperatingTime.TotalSeconds}초로 설정");
+            Console.WriteLine($"4. 타이머가 자동으로 종료됨\n");
+
+            Console.WriteLine($"타이머 배속: 2.0x (실제 1초 = 시뮬레이션 2초)");
+            Console.WriteLine($"예상 실제 종료 시간: 약 {actualOperatingTime.TotalSeconds / 2.0}초 후\n");
+
+            // 자동 종료 이벤트 핸들러 등록
+            SimulationTimer.OnAutoStopped += (time) =>
+            {
+                Console.WriteLine($"\n[자동 종료] 시뮬레이션 시간 {time.TotalSeconds:F2}초에서 자동 종료됨");
+                Console.WriteLine($"IsRunning: {SimulationTimer.IsRunning}");
+            };
+
+            // Tick 이벤트 핸들러 등록 (1초마다 출력)
+            TimeSpan lastPrintTime = TimeSpan.Zero;
+            SimulationTimer.OnTick += (time) =>
+            {
+                // 1초마다 출력
+                if (time - lastPrintTime >= TimeSpan.FromSeconds(1))
+                {
+                    Console.WriteLine($"[Tick] 시뮬레이션 시간: {time.TotalSeconds:F2}초");
+                    lastPrintTime = time;
+                }
+            };
+
+            // 1. 타이머 먼저 시작 (종료 시간 미설정)
+            Console.WriteLine("[1] 타이머 시작 (종료 시간 미설정)...\n");
+            SimulationTimer.Start(speed: 2.0);
+
+            // 2. SW 인스턴스 생성
+            var simulationSW = new SimulationEngineSW(actualOperatingTime);
+
+            // 3. 3초 후에 SW의 SimulationEnd() 호출 (종료 시간 설정)
+            Thread.Sleep(3000);
+            Console.WriteLine($"\n[2] 실제 시간 3초 경과 (시뮬레이션 시간 약 6초)");
+            simulationSW.SimulationEnd();
+
+            // 4. 자동 종료될 때까지 대기 (최대 20초)
+            int waitSeconds = 3; // 이미 3초 대기했음
+            while (SimulationTimer.IsRunning && waitSeconds < 20)
+            {
+                Thread.Sleep(1000);
+                waitSeconds++;
+            }
+
+            // 결과 확인
+            Console.WriteLine("\n=== 테스트 결과 ===");
+            Console.WriteLine($"타이머 실행 상태: {(SimulationTimer.IsRunning ? "실행 중" : "정지됨")}");
+            Console.WriteLine($"최종 시뮬레이션 시간: {SimulationTimer.CurrentTime.TotalSeconds:F2}초");
+            Console.WriteLine($"실제 대기 시간: {waitSeconds}초");
+
+            if (!SimulationTimer.IsRunning && SimulationTimer.CurrentTime >= actualOperatingTime)
+            {
+                Console.WriteLine("\n✓ 동적 종료 시간 설정 기능이 정상적으로 작동했습니다!");
+            }
+            else
+            {
+                Console.WriteLine("\n✗ 동적 종료 시간 설정 기능에 문제가 있습니다.");
+            }
+
+            Console.WriteLine("\n아무 키나 누르면 종료합니다...");
+            Console.ReadKey();
+        }
+    }
+}
