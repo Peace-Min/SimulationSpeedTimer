@@ -176,18 +176,31 @@ namespace SimulationSpeedTimer
         {
             try
             {
-                // 메타데이터 해석 (테이블이 생성될 때까지 무한 반복)
+                // 메타데이터 해석 (테이블이 생성될 때까지 대기)
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 while (_resolvedQuery == null && !token.IsCancellationRequested)
                 {
+                    // 1. 테이블 존재 여부 확인 (예외 발생 방지)
+                    if (!MetadataResolver.AreMetadataTablesReady(_connection, _config))
+                    {
+                        Thread.Sleep(100); // 테이블 생성 대기
+                        continue;
+                    }
+
                     try
                     {
                         _resolvedQuery = MetadataResolver.Resolve(_config, _connection);
                     }
-                    catch
+                    catch (InvalidOperationException)
                     {
-                        // 아직 테이블 생성 전이면 1ms 대기 후 재시도
-                        Thread.Sleep(1);
+                        // 테이블은 있으나 해당 객체/컬럼 정보가 아직 없는 경우
+                        Thread.Sleep(100);
+                    }
+                    catch (Exception ex)
+                    {
+                        // 기타 오류
+                        Console.WriteLine($"[{ServiceId}] Metadata Resolve Error: {ex.Message}");
+                        Thread.Sleep(1000);
                     }
                 }
                 sw.Stop();

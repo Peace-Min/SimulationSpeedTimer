@@ -110,5 +110,68 @@ namespace SimulationSpeedTimer
 
             return (tableName, columnName, timeColumnName);
         }
+
+        /// <summary>
+        /// 메타데이터 테이블(Object_Info, Column_Info)이 존재하고, 필요한 매핑 정보가 있는지 확인
+        /// </summary>
+        public static bool AreMetadataTablesReady(SQLiteConnection connection, DatabaseQueryConfig config = null)
+        {
+            // 1. 테이블 존재 여부 확인
+            if (!TableExists(connection, "Object_Info") || !TableExists(connection, "Column_Info"))
+            {
+                return false;
+            }
+
+            // 2. config가 없으면 테이블 존재만으로 true 반환
+            if (config == null)
+            {
+                return true;
+            }
+
+            // 3. 실제 매핑 데이터가 존재하는지 확인 (ResolveAxis가 성공할 수 있는지)
+            return IsAxisReady(connection, config.XAxisObjectName, config.XAxisAttributeName) &&
+                   IsAxisReady(connection, config.YAxisObjectName, config.YAxisAttributeName);
+        }
+
+        private static bool IsAxisReady(SQLiteConnection connection, string objectName, string attributeName)
+        {
+            string tableName = null;
+
+            // 1. Object_Info에서 table_name 조회
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.CommandText = "SELECT table_name FROM Object_Info WHERE object_name = @objectName LIMIT 1";
+                cmd.Parameters.AddWithValue("@objectName", objectName);
+                var result = cmd.ExecuteScalar();
+                if (result == null) return false;
+                tableName = result.ToString();
+            }
+
+            // 2. Column_Info에서 데이터 컬럼명 조회
+            // 예외 처리: 속성명이 's_time'인 경우 메타데이터 조회 없이 바로 사용 가능하므로 true
+            if (attributeName.Equals("s_time", StringComparison.OrdinalIgnoreCase) ||
+                attributeName.Equals("time", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.CommandText = "SELECT 1 FROM Column_Info WHERE table_name = @tableName AND attribute_name = @attributeName LIMIT 1";
+                cmd.Parameters.AddWithValue("@tableName", tableName);
+                cmd.Parameters.AddWithValue("@attributeName", attributeName);
+                return cmd.ExecuteScalar() != null;
+            }
+        }
+
+        private static bool TableExists(SQLiteConnection connection, string tableName)
+        {
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name=@name";
+                cmd.Parameters.AddWithValue("@name", tableName);
+                return cmd.ExecuteScalar() != null;
+            }
+        }
     }
 }
