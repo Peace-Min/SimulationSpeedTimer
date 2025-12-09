@@ -177,6 +177,7 @@ namespace SimulationSpeedTimer
             try
             {
                 // 메타데이터 해석 (테이블이 생성될 때까지 무한 반복)
+                var sw = System.Diagnostics.Stopwatch.StartNew();
                 while (_resolvedQuery == null && !token.IsCancellationRequested)
                 {
                     try
@@ -189,6 +190,8 @@ namespace SimulationSpeedTimer
                         Thread.Sleep(1);
                     }
                 }
+                sw.Stop();
+                Console.WriteLine($"[{ServiceId}] Metadata Resolve Time: {sw.ElapsedMilliseconds}ms");
 
                 while (!token.IsCancellationRequested)
                 {
