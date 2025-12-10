@@ -261,12 +261,69 @@ namespace SimulationSpeedTimer
                     return result;
                 }
 
+                // 데이터가 없을 때: 재시도 여부 결정 (Fast-Fail 로직)
+                // DB에 기록된 최신 시간이 현재 요청 구간보다 뒤에 있다면,
+                // 이 구간은 데이터가 없는 구간으로 확정하고 재시도 없이 종료
+                double maxTime = GetMaxTimeFromDB();
+                if (maxTime >= end) // end보다 크거나 같으면 이미 지나간 구간
+                {
+                    return null;
+                }
+
                 if (attemptCount < maxAttempts)
                 {
                     Thread.Sleep(_config.RetryIntervalMs);
                 }
             }
             return null;
+        }
+
+        /// <summary>
+        /// DB에 기록된 가장 최신 시간을 조회 (재시도 판단용)
+        /// </summary>
+        private double GetMaxTimeFromDB()
+        {
+            try
+            {
+                double maxX = -1.0;
+                double maxY = -1.0;
+
+                using (var cmd = _connection.CreateCommand())
+                {
+                    cmd.CommandText = $"SELECT MAX({_resolvedQuery.XAxisTimeColumnName}) FROM {_resolvedQuery.XAxisTableName}";
+                    var result = cmd.ExecuteScalar();
+                    if (result != null && result != DBNull.Value)
+                    {
+                        maxX = Convert.ToDouble(result);
+                    }
+                }
+
+                // 같은 테이블이면 X만 확인해도 충분
+                if (_resolvedQuery.IsSameTable)
+                {
+                    return maxX;
+                }
+
+                // 다른 테이블이면 Y축 테이블도 확인
+                using (var cmd = _connection.CreateCommand())
+                {
+                    cmd.CommandText = $"SELECT MAX({_resolvedQuery.YAxisTimeColumnName}) FROM {_resolvedQuery.YAxisTableName}";
+                    var result = cmd.ExecuteScalar();
+                    if (result != null && result != DBNull.Value)
+                    {
+                        maxY = Convert.ToDouble(result);
+                    }
+                }
+
+                // 둘 중 더 많이 진행된 시간을 반환 (Fast-Fail을 위해)
+                // 예: X는 10초, Y는 15초까지 기록됨 -> 현재 12초 조회 중 -> Y가 이미 지났으므로 12초는 데이터 없는 구간임
+                return Math.Max(maxX, maxY);
+            }
+            catch
+            {
+                // 오류 발생 시 무시
+            }
+            return -1.0;
         }
 
         /// <summary>
