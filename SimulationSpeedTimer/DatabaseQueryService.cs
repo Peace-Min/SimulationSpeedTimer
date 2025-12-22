@@ -106,35 +106,35 @@ namespace SimulationSpeedTimer
         /// <summary>
         /// DB 조회 서비스 정지 및 리소스 정리
         /// </summary>
+        /// <summary>
+        /// DB 조회 서비스 정지 및 리소스 정리
+        /// </summary>
         public void Stop()
         {
             if (!_isRunning) return;
-
             _isRunning = false;
 
-            // 취소 요청
+            // 1. 작업 취소 요청
             _cts?.Cancel();
 
-            // 워커 태스크 종료 대기
+            // 2. 큐 즉시 비우기 (이전 시뮬레이션 데이터 잔여물 제거)
+            // Stop 시점의 남은 작업은 의미 없으므로 모두 버림
+            while (_queryQueue.TryDequeue(out _)) { }
+
+            // 3. 워커 태스크 종료 대기 (최대 2초)
             try
             {
-                _workerTask?.Wait(1000); // 1초 타임아웃
+                _workerTask?.Wait(2000);
             }
             catch (AggregateException) { }
 
-            // Task 디스포즈
-            try
-            {
-                _workerTask?.Dispose();
-            }
-            catch { }
+            // 4. 리소스 정리
+            try { _workerTask?.Dispose(); } catch { }
             _workerTask = null;
 
-            // CancellationTokenSource 디스포즈
             _cts?.Dispose();
             _cts = null;
 
-            // SQLite 연결 닫기
             try
             {
                 _connection?.Close();
@@ -145,9 +145,6 @@ namespace SimulationSpeedTimer
                 Console.WriteLine($"[{ServiceId}] 연결 종료 중 오류: {ex.Message}");
             }
             _connection = null;
-
-            // 큐 비우기
-            while (_queryQueue.TryDequeue(out _)) { }
         }
 
         /// <summary>
