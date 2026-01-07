@@ -42,5 +42,22 @@ namespace SimulationSpeedTimer
         /// 기본값: 10ms
         /// </summary>
         public int RetryIntervalMs { get; set; } = 10;
+        /// <summary>
+        /// 설정 객체를 복제(Deep Copy)합니다.
+        /// 시뮬레이션 시작 시점의 스냅샷을 안전하게 보관하기 위함입니다.
+        /// </summary>
+        public DatabaseQueryConfig Clone()
+        {
+            return new DatabaseQueryConfig
+            {
+                DatabasePath = this.DatabasePath,
+                XAxisObjectName = this.XAxisObjectName,
+                XAxisAttributeName = this.XAxisAttributeName,
+                YAxisObjectName = this.YAxisObjectName,
+                YAxisAttributeName = this.YAxisAttributeName,
+                RetryCount = this.RetryCount,
+                RetryIntervalMs = this.RetryIntervalMs
+            };
+        }
     }
 }

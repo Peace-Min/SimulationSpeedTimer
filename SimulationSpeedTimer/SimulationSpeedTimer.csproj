@@ -56,15 +56,18 @@
   <ItemGroup>
     <Compile Include="ChartDataPoint.cs" />
     <Compile Include="DatabaseQueryConfig.cs" />
-    <Compile Include="DatabaseQueryService.cs" />
     <Compile Include="SimulationController.cs" />
-    <Compile Include="MetadataResolver.cs" />
-    <Compile Include="MetadataResolverTest.cs" />
+    <Compile Include="SimulationContext.cs" />
     <Compile Include="ResolvedQueryInfo.cs" />
+    <Compile Include="TableDataViewModel.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="SimulationTimer.cs" />
-    <Compile Include="Tests\StressTest.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="SimulationFrame.cs" />
+    <Compile Include="SimulationSchema.cs" />
+    <Compile Include="GlobalDataService.cs" />
+    <Compile Include="GlobalDataServiceTest.cs" />
+    <Compile Include="SharedFrameRepository.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
