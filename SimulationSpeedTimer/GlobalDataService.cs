@@ -33,6 +33,10 @@ namespace SimulationSpeedTimer
         private string _dbPath;
         private double _queryInterval = 1.0;
         
+        // Retry 설정 (DatabaseQueryService와 동일한 설계)
+        private int _retryCount = 3;
+        private int _retryIntervalMs = 10;
+        
         // [테스트용] 데이터 조회 결과 확인을 위한 Hook (외부 공개 X)
         internal event Action<Dictionary<double, SimulationFrame>> _onChunkProcessed;
 
@@ -41,7 +45,7 @@ namespace SimulationSpeedTimer
         /// <summary>
         /// 서비스 시작 (재시작 지원)
         /// </summary>
-        public void Start(string dbPath, double queryInterval = 1.0)
+        public void Start(string dbPath, double queryInterval = 1.0, int retryCount = 3, int retryIntervalMs = 10)
         {
             lock (_lock)
             {
@@ -63,6 +67,8 @@ namespace SimulationSpeedTimer
 
                 _dbPath = dbPath;
                 _queryInterval = queryInterval;
+                _retryCount = retryCount;
+                _retryIntervalMs = retryIntervalMs;
                 _cts = new CancellationTokenSource();
                 
                 // 4. 새 버퍼 생성
@@ -152,19 +158,28 @@ namespace SimulationSpeedTimer
                 {
                     lastSeenTime = time;
 
+
                     if (time >= nextCheckpoint)
                     {
                         double rangeStart = nextCheckpoint - _queryInterval;
                         double rangeEnd = nextCheckpoint;
 
-                        var chunk = FetchAllTablesRange(connection, rangeStart, rangeEnd);
+                        var chunk = FetchAllTablesRangeWithRetry(connection, rangeStart, rangeEnd, token);
                         
-                        // 데이터 저장 및 테스트 Hook 호출
-                        if (chunk != null && chunk.Count > 0)
+                        // 핵심: 데이터 유무와 관계없이 무조건 저장 및 이벤트 발생
+                        // null 여부 판단은 Controller의 책임
+                        if (chunk == null || chunk.Count == 0)
                         {
-                            SharedFrameRepository.Instance.StoreChunk(chunk);
-                            _onChunkProcessed?.Invoke(chunk); // 테스트용
+                            chunk = new Dictionary<double, SimulationFrame>();
+                            
+                            // 최적화: 스키마를 순회하며 껍데기를 만들 필요 없음.
+                            // Controller는 GetTable()이 null이면 데이터가 없음을 이미 인지할 수 있음.
+                            chunk[time] = new SimulationFrame(time); 
                         }
+                        
+                        // 데이터 저장 및 이벤트 발생
+                        SharedFrameRepository.Instance.StoreChunk(chunk);
+                        _onChunkProcessed?.Invoke(chunk); // 테스트용
 
                         lastQueryEndTime = nextCheckpoint;
                         while (time >= nextCheckpoint)
@@ -184,7 +199,7 @@ namespace SimulationSpeedTimer
                     double start = lastQueryEndTime;
                     double end = lastSeenTime;
                     
-                    var finalChunk = FetchAllTablesRange(connection, start, end);
+                    var finalChunk = FetchAllTablesRangeWithRetry(connection, start, end, token);
                     if (finalChunk != null && finalChunk.Count > 0)
                     {
                         Console.WriteLine($"[GlobalDataService] Final tail chunk processed: {start:F2}s ~ {end:F2}s");
@@ -371,6 +386,88 @@ namespace SimulationSpeedTimer
             {
                 Console.WriteLine($"[GlobalDataService] Schema validation exception: {ex.Message}");
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// 재시도 로직이 포함된 DB 범위 조회 메서드 (DatabaseQueryService와 동일한 설계)
+        /// </summary>
+        private Dictionary<double, SimulationFrame> FetchAllTablesRangeWithRetry(SQLiteConnection conn, double start, double end, CancellationToken token)
+        {
+            int attemptCount = 0;
+            int maxAttempts = _retryCount + 1;
+
+            while (attemptCount < maxAttempts && !token.IsCancellationRequested)
+            {
+                attemptCount++;
+
+                var result = FetchAllTablesRange(conn, start, end);
+
+                if (result != null && result.Count > 0)
+                {
+                    if (attemptCount > 1)
+                    {
+                        Console.WriteLine($"[GlobalDataService] Data found after {attemptCount} attempts (Range: {start:F2}s ~ {end:F2}s)");
+                    }
+                    return result;
+                }
+
+                // Fast-Fail 로직: DB에 기록된 최신 시간이 현재 요청 구간보다 뒤에 있다면,
+                // 이 구간은 데이터가 없는 구간으로 확정하고 재시도 없이 종료
+                double maxTime = GetMaxTimeFromDB(conn);
+                if (maxTime >= end) // end보다 크거나 같으면 이미 지나간 구간
+                {
+                    // 데이터가 없는 구간으로 확정
+                    return result; // null 또는 빈 딕셔너리 반환
+                }
+
+                if (attemptCount < maxAttempts)
+                {
+                    Thread.Sleep(_retryIntervalMs);
+                }
+            }
+
+            // 모든 재시도 실패
+            Console.WriteLine($"[GlobalDataService] No data found after {maxAttempts} attempts (Range: {start:F2}s ~ {end:F2}s) - Simulation may have ended");
+            return new Dictionary<double, SimulationFrame>();
+        }
+
+        /// <summary>
+        /// DB에 기록된 가장 최신 시간을 조회 (재시도 판단용 - Fast-Fail)
+        /// </summary>
+        private double GetMaxTimeFromDB(SQLiteConnection conn)
+        {
+            try
+            {
+                if (_schema == null || !_schema.Tables.Any())
+                    return -1.0;
+
+                double maxTime = -1.0;
+
+                // 모든 테이블의 최대 s_time 확인
+                foreach (var tableInfo in _schema.Tables)
+                {
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = $"SELECT MAX(s_time) FROM {tableInfo.TableName}";
+                        var result = cmd.ExecuteScalar();
+                        if (result != null && result != DBNull.Value)
+                        {
+                            double tableMaxTime = Convert.ToDouble(result);
+                            if (tableMaxTime > maxTime)
+                            {
+                                maxTime = tableMaxTime;
+                            }
+                        }
+                    }
+                }
+
+                return maxTime;
+            }
+            catch
+            {
+                // 오류 발생 시 무시
+                return -1.0;
             }
         }
         

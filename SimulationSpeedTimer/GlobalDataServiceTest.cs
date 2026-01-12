@@ -51,7 +51,7 @@ namespace SimulationSpeedTimer
             SimulationContext.Instance.Start();
             
             string dbPath = CreateTempDatabaseWithData(0.0, 5, 0.5);
-            GlobalDataService.Instance.Start(dbPath, 0.5);
+            GlobalDataService.Instance.Start(dbPath, 0.5, retryCount: 5, retryIntervalMs: 20);
             
             // Inject Data
             for(int k=0; k<5; k++) GlobalDataService.Instance.EnqueueTime(k * 0.1);
@@ -93,7 +93,7 @@ namespace SimulationSpeedTimer
             SimulationContext.Instance.Start();
             
             string dbPathA = CreateTempDatabaseWithData(1000.0, 5, 0.5); 
-            GlobalDataService.Instance.Start(dbPathA, 0.5);
+            GlobalDataService.Instance.Start(dbPathA, 0.5, retryCount: 5, retryIntervalMs: 20);
 
             // [FIX] Inject Time Signals to trigger queries
             for(int k=0; k<5; k++) GlobalDataService.Instance.EnqueueTime(1000.0 + k * 0.1);
@@ -136,7 +136,7 @@ namespace SimulationSpeedTimer
 
             // Service Start (Session B 데이터)
             string dbPathB = CreateTempDatabaseWithData(0.0, 5, 0.5);
-            GlobalDataService.Instance.Start(dbPathB, 0.5);
+            GlobalDataService.Instance.Start(dbPathB, 0.5, retryCount: 5, retryIntervalMs: 20);
 
             // [FIX] Inject Time Signals for B
             for(int k=0; k<5; k++) GlobalDataService.Instance.EnqueueTime(0.0 + k * 0.1);
