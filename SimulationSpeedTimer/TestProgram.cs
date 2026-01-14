@@ -10,30 +10,8 @@ namespace SimulationSpeedTimer
     {
         static void Main(string[] args)
         {
-            Console.WriteLine("=== SimulationTimer & DatabaseQueryService 재시작 테스트 ===\n");
-
-            // 테스트 1: 기본 시작/정지
-            Console.WriteLine("[테스트 1] 기본 시작 -> 정지");
-            TestBasicStartStop();
-            Thread.Sleep(500);
-
-            // 테스트 2: 여러 번 재시작
-            Console.WriteLine("\n[테스트 2] 여러 번 재시작 (5회)");
-            TestMultipleRestarts(5);
-            Thread.Sleep(500);
-
-            // 테스트 3: 일시정지 후 재시작
-            Console.WriteLine("\n[테스트 3] 일시정지 -> 재시작");
-            TestPauseResume();
-            Thread.Sleep(500);
-
-            // 테스트 4: 배속 변경 재시작
-            Console.WriteLine("\n[테스트 4] 배속 변경 재시작");
-            TestSpeedChange();
-
-            Console.WriteLine("\n\n=== 모든 테스트 완료 ===");
-            Console.WriteLine("아무 키나 누르면 종료합니다...");
-            Console.ReadKey();
+            // [New Architecture] Validator 실행 (필수 격리 테스트)
+            SimulationSpeedTimer.Tests.ArchitectureValidator.Run();
         }
 
         static void TestBasicStartStop()

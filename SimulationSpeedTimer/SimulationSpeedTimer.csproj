@@ -68,6 +68,7 @@
     <Compile Include="GlobalDataService.cs" />
     <Compile Include="GlobalDataServiceTest.cs" />
     <Compile Include="SharedFrameRepository.cs" />
+    <Compile Include="Tests\ArchitectureValidator.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

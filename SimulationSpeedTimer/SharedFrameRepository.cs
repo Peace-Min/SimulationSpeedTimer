@@ -59,13 +59,23 @@ namespace SimulationSpeedTimer
         /// <summary>
         /// 청크 단위로 데이터 저장 (GlobalDataService에서 호출)
         /// </summary>
-        public void StoreChunk(Dictionary<double, SimulationFrame> chunk)
+        public void StoreChunk(Dictionary<double, SimulationFrame> chunk, Guid sessionId)
         {
             if (chunk == null || chunk.Count == 0) return;
+
+            // 핵심: 세션 ID 검증 (이전 세션의 데이터가 늦게 도착하면 폐기)
+            if (sessionId != _currentSessionId)
+            {
+                // Console.WriteLine($"[SharedFrameRepository] Data rejected. Session mismatch. (Start:{sessionId} != Current:{_currentSessionId})");
+                return;
+            }
 
             _lock.EnterWriteLock();
             try
             {
+                // 재검증 (Lock 획득 사이 변경 가능성)
+                 if (sessionId != _currentSessionId) return;
+
                 foreach (var kvp in chunk)
                 {
                     _frames[kvp.Key] = kvp.Value;
