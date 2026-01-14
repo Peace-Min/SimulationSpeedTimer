@@ -120,6 +120,11 @@ namespace SimulationSpeedTimer.Tests
                 }
 
                 Console.WriteLine("[Session Isolation Test: Pass]");
+
+                // 2. 정상 종료 및 강제 중단 테스트
+                TestGracefulShutdownOverride();
+
+                Console.WriteLine("\n[Architecture Check: PASS]");
             }
             finally
             {
@@ -127,6 +132,52 @@ namespace SimulationSpeedTimer.Tests
                 SimulationContext.Instance.Stop();
                 CleanupDb(dbPathA);
                 CleanupDb(dbPathB);
+            }
+        }
+
+        private static void TestGracefulShutdownOverride()
+        {
+            Console.WriteLine("\n[Test] Graceful Shutdown Override (Complete -> Stop)");
+            string dbPath = CreateTempDb("Graceful");
+            
+            try
+            {
+                SimulationContext.Instance.Start();
+                GlobalDataService.Instance.Start(dbPath, queryInterval: 0.1);
+
+                // 1. Data Injection
+                for (int i = 0; i < 50; i++) GlobalDataService.Instance.EnqueueTime(i * 0.1);
+
+                // 2. Request CompleteSession with Callback
+                bool callbackInvoked = false;
+                Console.WriteLine("2. Requesting CompleteSession...");
+                
+                GlobalDataService.Instance.CompleteSession(() => 
+                {
+                    callbackInvoked = true;
+                    Console.WriteLine("   -> Callback Invoked (Should NOT happen if Stopped early)");
+                });
+
+                // 3. Immediately Override with Stop()
+                Console.WriteLine("3. Calling Stop() IMMEDIATELY (Override)...");
+                GlobalDataService.Instance.Stop();
+
+                // 4. Wait a bit to ensure worker finishes
+                Thread.Sleep(1000);
+
+                if (callbackInvoked)
+                {
+                    throw new Exception("Graceful Shutdown Callback was invoked despite Forced Stop! (Fail)");
+                }
+                else
+                {
+                    Console.WriteLine("   -> Callback NOT Invoked (Correct behavior).");
+                    Console.WriteLine("[Graceful Shutdown Override Test: Pass]");
+                }
+            }
+            finally 
+            {
+                CleanupDb(dbPath);
             }
         }
 

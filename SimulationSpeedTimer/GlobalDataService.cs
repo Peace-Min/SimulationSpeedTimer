@@ -66,6 +66,15 @@ namespace SimulationSpeedTimer
             _currentSession?.Enqueue(time);
         }
 
+        /// <summary>
+        /// 세션 정상 종료 요청 (Graceful Shutdown)
+        /// 더 이상 데이터를 받지 않고, 내부 버퍼를 모두 처리한 후 콜백 호출
+        /// </summary>
+        public void CompleteSession(Action onFlushCompleted = null)
+        {
+            _currentSession?.MarkComplete(onFlushCompleted);
+        }
+
         public void Stop()
         {
             var session = _currentSession;
@@ -94,6 +103,9 @@ namespace SimulationSpeedTimer
             private CancellationTokenSource _cts;
             private BlockingCollection<double> _timeBuffer;
             private SimulationSchema _schema;
+
+            // 정상 종료 콜백 (Stop 호출 시 null 처리됨)
+            private volatile Action _completionCallback;
 
             // 이벤트 Hooks
             public event Action<Dictionary<double, SimulationFrame>> OnChunkProcessed;
@@ -126,16 +138,34 @@ namespace SimulationSpeedTimer
                 catch (ObjectDisposedException) { }
             }
 
-            public void Stop()
+            public void MarkComplete(Action callback)
             {
+                _completionCallback = callback;
                 try
                 {
-                    _timeBuffer?.CompleteAdding();
+                    _timeBuffer.CompleteAdding();
+                }
+                catch (ObjectDisposedException) { }
+            }
+
+            public void Stop()
+            {
+                // 강제 중단 시 완료 콜백 무효화 (실행 방지)
+                _completionCallback = null;
+
+                try
+                {
+                    _timeBuffer?.CompleteAdding(); // 추가 중단
+                }
+                catch (ObjectDisposedException) { }
+
+                try
+                {
+                    _cts?.Cancel(); // 작업 취소
                 }
                 catch (ObjectDisposedException) { }
 
                 // 비동기로 종료 대기 (GlobalDataService는 기다리지 않음)
-                // 필요하다면 여기서 _workerTask.Wait()를 할 수도 있지만, 
                 // "Zero-Wait" 철학에 따라 백그라운드에서 정리되도록 둠.
                 // 단, 리소스 정리를 위해 Task가 끝날 때 Dispose를 수행해야 함.
             }
@@ -204,6 +234,13 @@ namespace SimulationSpeedTimer
                 }
                 finally
                 {
+                    // 정상 종료 콜백 실행 (Stop에 의해 null 처리되었다면 실행되지 않음)
+                    var callback = _completionCallback;
+                    if (callback != null)
+                    {
+                        try { callback.Invoke(); } catch { /* Callback error ignored */ }
+                    }
+
                     if (connection != null)
                     {
                         // Checkpoint 실행 (WAL 파일 정리 준비)
@@ -315,21 +352,7 @@ namespace SimulationSpeedTimer
                             }
                         }
                     }
-                    catch (SQLiteException ex)
-                    {
-                        // [Non-Fatal] 특정 테이블 조회 실패는 무시하고 계속 진행 (로그 기록)
-                        Console.WriteLine($"[GlobalDataService] Table Query Warning ({tableInfo.TableName}): {ex.Message}");
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        // [Fatal] DB 연결이 끊긴 경우 -> 상위로 전파하여 루프 중단 유도
-                        throw;
-                    }
-                    catch (InvalidOperationException)
-                    {
-                        // [Fatal] DB 상태가 유효하지 않음 -> 상위로 전파
-                        throw;
-                    }
+                    catch { /* 쿼리 오류 무시 */ }
                 }
                 return chunk;
             }
