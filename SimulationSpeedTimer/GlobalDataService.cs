@@ -47,7 +47,7 @@ namespace SimulationSpeedTimer
 
             // 3. 새 세션 생성 및 시작
             var newSession = new DataSession(sessionId, dbPath, queryInterval, retryCount, retryIntervalMs);
-            
+
             // 이벤트 연결
             newSession.OnChunkProcessed += (chunk) => _onChunkProcessed?.Invoke(chunk);
 
@@ -209,11 +209,21 @@ namespace SimulationSpeedTimer
                             ProcessRange(connection, rangeStart, rangeEnd, token);
 
                             lastQueryEndTime = nextCheckpoint;
-                            // [최적화] 반복문 대신 계산식을 통한 즉시 시간 이동 (무한 루프 방지)
+                            // [루프 최적화: Fast-Forward]
+                            // 데이터가 밀려서 수신된 시간(time)과 현재 처리 시점(nextCheckpoint)의 격차가 큰 경우(예: 0.2 -> 0.9),
+                            // 0.1초씩 루프를 돌며 처리하는 대신, 격차만큼 한 번에 건너뛰어 최신 시점을 즉시 따라잡습니다.
+                            // [루프 최적화: Fast-Forward]
+                            // 데이터가 밀려서 수신된 시간(time)과 현재 처리 시점(nextCheckpoint)의 격차가 큰 경우,
+                            // 루프를 돌지 않고 한 번에 처리(Range Query) 후 인덱스를 점프합니다.
                             double gap = time - nextCheckpoint;
-                            if (gap >= 0)
+                            if (gap > _queryInterval) // 격차가 1 Interval보다 클 때만 수행
                             {
-                                int jumps = (int)Math.Floor(gap / _queryInterval) + 1;
+                                // 점프할 구간의 데이터를 통째로 처리 (데이터 누락 방지)
+                                ProcessRange(connection, nextCheckpoint, time, token);
+
+                                // 인덱스 이동 (time 바로 다음 Interval로 맞춤)
+                                // 예: time=100.5, interval=0.5 -> nextCheckpoint를 101.0으로 설정
+                                int jumps = (int)Math.Floor((time - nextCheckpoint) / _queryInterval) + 1;
                                 nextCheckpoint += jumps * _queryInterval;
                             }
                         }
@@ -359,26 +369,26 @@ namespace SimulationSpeedTimer
 
             private double GetMaxTimeFromDB(SQLiteConnection conn)
             {
-                 try
-                 {
-                     if (_schema == null || !_schema.Tables.Any()) return -1.0;
-                     double maxTime = -1.0;
-                     foreach (var tableInfo in _schema.Tables)
-                     {
-                         using (var cmd = conn.CreateCommand())
-                         {
-                             cmd.CommandText = $"SELECT MAX(s_time) FROM {tableInfo.TableName}";
-                             var result = cmd.ExecuteScalar();
-                             if (result != null && result != DBNull.Value)
-                             {
-                                 double t = Convert.ToDouble(result);
-                                 if (t > maxTime) maxTime = t;
-                             }
-                         }
-                     }
-                     return maxTime;
-                 }
-                 catch { return -1.0; }
+                try
+                {
+                    if (_schema == null || !_schema.Tables.Any()) return -1.0;
+                    double maxTime = -1.0;
+                    foreach (var tableInfo in _schema.Tables)
+                    {
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.CommandText = $"SELECT MAX(s_time) FROM {tableInfo.TableName}";
+                            var result = cmd.ExecuteScalar();
+                            if (result != null && result != DBNull.Value)
+                            {
+                                double t = Convert.ToDouble(result);
+                                if (t > maxTime) maxTime = t;
+                            }
+                        }
+                    }
+                    return maxTime;
+                }
+                catch { return -1.0; }
             }
 
             private SQLiteConnection WaitForConnection(CancellationToken token)
@@ -416,13 +426,13 @@ namespace SimulationSpeedTimer
                         }
 
                         var schema = LoadSchemaFailedSafe(conn);
-                        if(schema != null && ValidateSchema(conn, schema))
+                        if (schema != null && ValidateSchema(conn, schema))
                         {
-                             SharedFrameRepository.Instance.Schema = schema;
-                             return schema;
+                            SharedFrameRepository.Instance.Schema = schema;
+                            return schema;
                         }
-                        
-                         token.WaitHandle.WaitOne(1000);
+
+                        token.WaitHandle.WaitOne(1000);
                     }
                     catch { token.WaitHandle.WaitOne(1000); }
                 }
@@ -431,34 +441,37 @@ namespace SimulationSpeedTimer
 
             private SimulationSchema LoadSchemaFailedSafe(SQLiteConnection conn)
             {
-                 try {
-                     var schema = new SimulationSchema();
-                     using (var cmd = conn.CreateCommand())
-                     {
-                         cmd.CommandText = "SELECT object_name, table_name FROM Object_Info";
-                         using (var reader = cmd.ExecuteReader())
-                         {
-                             while (reader.Read()) schema.AddTable(new SchemaTableInfo(reader["table_name"]?.ToString(), reader["object_name"]?.ToString()));
-                         }
-                     }
-                     using (var cmd = conn.CreateCommand())
-                     {
-                         cmd.CommandText = "SELECT table_name, column_name, attribute_name, data_type FROM Column_Info";
-                         using (var reader = cmd.ExecuteReader())
-                         {
-                             while(reader.Read()) {
-                                 var t = schema.GetTable(reader["table_name"]?.ToString());
-                                 t?.AddColumn(new SchemaColumnInfo(reader["column_name"]?.ToString(), reader["attribute_name"]?.ToString(), reader["data_type"]?.ToString()));
-                             }
-                         }
-                     }
-                     return schema;
-                 } catch { return null; }
+                try
+                {
+                    var schema = new SimulationSchema();
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = "SELECT object_name, table_name FROM Object_Info";
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read()) schema.AddTable(new SchemaTableInfo(reader["table_name"]?.ToString(), reader["object_name"]?.ToString()));
+                        }
+                    }
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = "SELECT table_name, column_name, attribute_name, data_type FROM Column_Info";
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                var t = schema.GetTable(reader["table_name"]?.ToString());
+                                t?.AddColumn(new SchemaColumnInfo(reader["column_name"]?.ToString(), reader["attribute_name"]?.ToString(), reader["data_type"]?.ToString()));
+                            }
+                        }
+                    }
+                    return schema;
+                }
+                catch { return null; }
             }
 
             private bool ValidateSchema(SQLiteConnection conn, SimulationSchema schema)
             {
-                 try
+                try
                 {
                     foreach (var tableInfo in schema.Tables)
                     {
@@ -480,13 +493,15 @@ namespace SimulationSpeedTimer
 
             private void TryCheckpoint(SQLiteConnection conn)
             {
-                 try
-                 {
-                     using(var cmd = conn.CreateCommand()) {
-                         cmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
-                         cmd.ExecuteNonQuery();
-                     }
-                 } catch {}
+                try
+                {
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+                catch { }
             }
         }
     }

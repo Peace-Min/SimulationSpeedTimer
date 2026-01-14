@@ -9,7 +9,8 @@ namespace SimulationSpeedTimer
             Console.WriteLine("=== Architecture Validation & Backtest ===");
 
             // [New Architecture] Validator 실행 (필수 격리 테스트)
-            SimulationSpeedTimer.Tests.ArchitectureValidator.Run();
+            // SimulationSpeedTimer.Tests.ArchitectureValidator.Run();
+            SimulationSpeedTimer.Tests.StabilityCheck.Run();
         }
     }
 }
