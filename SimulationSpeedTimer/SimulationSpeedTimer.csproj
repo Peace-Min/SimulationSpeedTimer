@@ -57,7 +57,7 @@
   <ItemGroup>
     <Compile Include="ChartDataPoint.cs" />
     <Compile Include="DatabaseQueryConfig.cs" />
-    <Compile Include="SimulationController.cs" />
+    <Compile Include="ChartAxisDataProvider.cs" />
     <Compile Include="SimulationContext.cs" />
     <Compile Include="ResolvedQueryInfo.cs" />
     <Compile Include="TableDataViewModel.cs" />

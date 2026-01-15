@@ -4,21 +4,19 @@ using System.Linq;
 
 namespace SimulationSpeedTimer
 {
-    public class SimulationController
+    public class ChartAxisDataProvider 
     {
         // Singleton Instance
-        private static SimulationController _instance;
-        public static SimulationController Instance => _instance ?? (_instance = new SimulationController());
+        private static ChartAxisDataProvider _instance;
+        public static ChartAxisDataProvider Instance => _instance ?? (_instance = new ChartAxisDataProvider());
 
         private Guid _currentSessionId;
-        private List<ResolvedQueryInfo> _resolvedQueries = new List<ResolvedQueryInfo>();
         private List<DatabaseQueryConfig> _configs = new List<DatabaseQueryConfig>();
-        private bool _isResolved = false;
 
         // UI 갱신 델리게이트 (외부에서 설정)
         public Action<double, double, double> OnDataUpdated; 
 
-        private SimulationController()
+        private ChartAxisDataProvider()
         {
             // Context 라이프사이클 구독
             SimulationContext.Instance.OnSessionStarted += OnSessionStarted;
@@ -34,10 +32,6 @@ namespace SimulationSpeedTimer
         private void OnSessionStarted(Guid sessionId)
         {
             _currentSessionId = sessionId;
-            _resolvedQueries.Clear();
-            _isResolved = false;
-            // _processedCount = 0; // These variables are not defined in the provided code.
-            // _lastTime = 0; // These variables are not defined in the provided code.
             Console.WriteLine($"[SimulationController] Session Started: {_currentSessionId}");
 
             // 동적 구독 시작
@@ -61,17 +55,6 @@ namespace SimulationSpeedTimer
             // 1. 세션 ID 검증 (Lifecycle Isolation)
             if (sessionId != _currentSessionId) return;
 
-            // 2. 메타데이터 해석 (Lazy Load)
-            if (!_isResolved)
-            {
-                if (SharedFrameRepository.Instance.Schema != null)
-                {
-                    ResolveMetadata();
-                    _isResolved = true;
-                }
-                else return; 
-            }
-
             // 3. 데이터 처리 및 UI 업데이트
             foreach (var frame in frames)
             {
@@ -79,63 +62,20 @@ namespace SimulationSpeedTimer
             }
         }
 
-        private void ResolveMetadata()
-        {
-            var schema = SharedFrameRepository.Instance.Schema;
-            _resolvedQueries.Clear();
-
-            Console.WriteLine("[SimulationController] Resolving Metadata...");
-
-            foreach (var config in _configs)
-            {
-                // X축 매핑
-                var tableX = schema.Tables.FirstOrDefault(t => t.ObjectName == config.XAxisObjectName);
-                string colX = FindColumn(tableX, config.XAxisAttributeName);
-
-                // Y축 매핑
-                var tableY = schema.Tables.FirstOrDefault(t => t.ObjectName == config.YAxisObjectName);
-                string colY = FindColumn(tableY, config.YAxisAttributeName);
-
-                if (colX != null && colY != null)
-                {
-                    _resolvedQueries.Add(new ResolvedQueryInfo
-                    {
-                        XTableName = tableX.TableName,
-                        XColumnName = colX,
-                        YTableName = tableY.TableName,
-                        YColumnName = colY,
-                        OriginalConfig = config
-                    });
-                    Console.WriteLine($"[Mapped] {config.XAxisObjectName}.{config.XAxisAttributeName}({tableX.TableName}.{colX}) & {config.YAxisObjectName}.{config.YAxisAttributeName}({tableY.TableName}.{colY})");
-                }
-            }
-        }
-
-        private string FindColumn(SchemaTableInfo table, string logicalAttr)
-        {
-            if (table == null) return null;
-            var col = table.Columns.FirstOrDefault(c => c.AttributeName == logicalAttr);
-            if (col == null)
-            {
-                Console.WriteLine($"[Warn] Attribute '{logicalAttr}' not found in table '{table.TableName}'.");
-                return null;
-            }
-            return col.ColumnName;
-        }
-
         private void ProcessFrame(SimulationFrame frame)
         {
             // SimulationFrame은 특정 시간 T에 대한 모든 테이블의 데이터 스냅샷입니다.
-            // 따라서 frame 안에 데이터가 존재한다는 것 자체가 시간 동기화(Join by Time)가 보장됨을 의미합니다.
+            // GlobalDataService에서 이미 논리적 이름(ObjectName, AttributeName)으로 변환되어 저장되므로
+            // 별도의 메타데이터 매핑 없이 설정(Config)값 그대로 조회하면 됩니다.
 
-            foreach (var query in _resolvedQueries)
+            foreach (var config in _configs)
             {
                 // Inner Join Logic:
                 // X축 데이터와 Y축 데이터가 *모두* 존재해야만 유효한 시뮬레이션 데이터로 간주합니다.
-                // 서로 다른 테이블에 있더라도 SimulationFrame 구조상 같은 Time Key를 공유합니다.
-
-                double? xVal = GetValue(frame, query.XTableName, query.XColumnName);
-                double? yVal = GetValue(frame, query.YTableName, query.YColumnName);
+                
+                // Config에 있는 논리적 이름(예: SAM001, Velocity)으로 직접 조회
+                double? xVal = GetValue(frame, config.XAxisObjectName, config.XAxisAttributeName);
+                double? yVal = GetValue(frame, config.YAxisObjectName, config.YAxisAttributeName);
 
                 // 둘 중 하나라도 없으면 과감히 Skip (Partial Data 무시)
                 if (xVal.HasValue && yVal.HasValue)

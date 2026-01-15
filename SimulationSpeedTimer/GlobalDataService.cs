@@ -209,15 +209,15 @@ namespace SimulationSpeedTimer
                             ProcessRange(connection, rangeStart, rangeEnd, token);
 
                             lastQueryEndTime = nextCheckpoint;
-                            // [루프 최적화: Fast-Forward]
-                            // 데이터가 밀려서 수신된 시간(time)과 현재 처리 시점(nextCheckpoint)의 격차가 큰 경우(예: 0.2 -> 0.9),
-                            // 0.1초씩 루프를 돌며 처리하는 대신, 격차만큼 한 번에 건너뛰어 최신 시점을 즉시 따라잡습니다.
-                            // [루프 최적화: Fast-Forward]
-                            // 데이터가 밀려서 수신된 시간(time)과 현재 처리 시점(nextCheckpoint)의 격차가 큰 경우,
-                            // 루프를 돌지 않고 한 번에 처리(Range Query) 후 인덱스를 점프합니다.
-                            double gap = time - nextCheckpoint;
-                            if (gap > _queryInterval) // 격차가 1 Interval보다 클 때만 수행
-                            {
+                                // [루프 최적화: Fast-Forward]
+                                // 데이터가 밀려서 수신된 시간(time)과 현재 처리 시점(nextCheckpoint)의 격차가 큰 경우(예: 0.2 -> 0.9),
+                                // 0.1초씩 루프를 돌며 처리하는 대신, 격차만큼 한 번에 건너뛰어 최신 시점을 즉시 따라잡습니다.
+                                // [루프 최적화: Fast-Forward]
+                                // 데이터가 밀려서 수신된 시간(time)과 현재 처리 시점(nextCheckpoint)의 격차가 큰 경우,
+                                // 루프를 돌지 않고 한 번에 처리(Range Query) 후 인덱스를 점프합니다.
+                                double gap = time - nextCheckpoint;
+                                if (gap > _queryInterval) // 격차가 1 Interval보다 클 때만 수행
+                                {
                                 // 점프할 구간의 데이터를 통째로 처리 (데이터 누락 방지)
                                 ProcessRange(connection, nextCheckpoint, time, token);
 
@@ -349,13 +349,27 @@ namespace SimulationSpeedTimer
                                         chunk[t] = frame;
                                     }
 
-                                    var tableData = new SimulationTable(tableInfo.TableName);
+                                    // [네이밍 변환] Object_Info의 논리적 이름(ObjectName)으로 매핑하여 저장
+                                    // 예: Object_Table_0 -> SAM001
+                                    string resolvedName = !string.IsNullOrEmpty(tableInfo.ObjectName) 
+                                        ? tableInfo.ObjectName 
+                                        : tableInfo.TableName;
+
+                                    var tableData = new SimulationTable(resolvedName);
                                     for (int i = 0; i < reader.FieldCount; i++)
                                     {
                                         string colName = reader.GetName(i);
                                         if (colName == "s_time") continue;
+
+                                        // [컬럼 네이밍 변환] COL1 -> Velocity
+                                        string resolvedColName = colName;
+                                        if (tableInfo.ColumnsByPhysicalName.TryGetValue(colName, out var colInfo))
+                                        {
+                                            resolvedColName = colInfo.AttributeName;
+                                        }
+
                                         var val = reader.GetValue(i);
-                                        if (val != DBNull.Value) tableData.AddColumn(colName, val);
+                                        if (val != DBNull.Value) tableData.AddColumn(resolvedColName, val);
                                     }
                                     frame.AddOrUpdateTable(tableData);
                                 }
@@ -408,7 +422,7 @@ namespace SimulationSpeedTimer
                 return null;
             }
 
-            private SimulationSchema WaitForSchemaReady(SQLiteConnection conn, CancellationToken token)
+            private SimulationSchema                                                                                                                                    WaitForSchemaReady(SQLiteConnection conn, CancellationToken token)
             {
                 while (!token.IsCancellationRequested)
                 {
