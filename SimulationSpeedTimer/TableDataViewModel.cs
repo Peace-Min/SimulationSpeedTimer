@@ -141,42 +141,67 @@ namespace SimulationSpeedTimer
         {
             if (_currentSessionId != sessionId) return;
 
-            // [데이터 변환 및 분배 로직]
-            // 수신된 프레임을 테이블별로 쪼개서 각 _rowCache에 넣음
+            // [Step 1: Background Thread] 데이터 변환 및 배치 준비
+            // UI 스레드 개입 없이 순수 CPU 연산으로 데이터를 미리 가공합니다.
+            // Key: TableName, Value: 추가할 Row 리스트
+            var batchBuffer = new Dictionary<string, List<System.Dynamic.ExpandoObject>>();
+            
+            // 관리 중인 테이블 키 미리 확보 (Thread-Safe Access pattern 필요 시 복사 사용)
+            var targetTables = _rowCache.Keys.ToList();
+            foreach(var tb in targetTables) batchBuffer[tb] = new List<System.Dynamic.ExpandoObject>();
+
             foreach (var frame in frames)
             {
-                // 현재 관리 중인 모든 테이블에 대해 반복
-                foreach (var kvp in _rowCache) 
+                foreach (var tableName in targetTables)
                 {
-                    string tableName = kvp.Key;
-                    var rowCollection = kvp.Value;
-
-                    // 해당 프레임에 이 테이블 데이터가 있나?
                     var tableData = frame.GetTable(tableName);
-                    
-                    // 데이터가 없어도 Time은 찍어줘야 한다면 로직 변경 필요. 
-                    // 여기서는 데이터가 있을 때만 행 추가.
                     if (tableData != null)
                     {
+                        // Row 객체 생성 (ExpandoObject)
                         var row = new System.Dynamic.ExpandoObject();
                         var dict = (IDictionary<string, object>)row;
 
-                        // 1. Time (기본)
+                        // 1. Time
                         dict["Time"] = frame.Time;
 
-                        // 2. 컬럼 데이터 매핑
+                        // 2. Columns
                         foreach (var colName in tableData.ColumnNames)
                         {
                             dict[colName] = tableData[colName];
                         }
 
-                        // 3. 컬렉션 추가 (Lock에 의해 스레드 안전)
-                        lock (_collectionLock)
-                        {
-                            rowCollection.Add(row);
-                        }
+                        // 3. 임시 버퍼에 저장 (메인 스레드 호출 아님)
+                        batchBuffer[tableName].Add(row);
                     }
                 }
+            }
+
+            // [Step 2: UI Thread] 일괄 업데이트 (Batch Update)
+            // 데이터가 있는 경우에만, 단 한 번의 Dispatcher 호출로 처리합니다.
+            // 이렇게 하면 N개의 마샬링 비용이 1로 줄어들어 UI 끊김이 사라집니다.
+            bool hasData = batchBuffer.Any(x => x.Value.Count > 0);
+            if (hasData)
+            {
+                System.Windows.Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    // UI 스레드 내부 진입
+                    foreach (var kvp in batchBuffer)
+                    {
+                        var rowsToAdd = kvp.Value;
+                        if (rowsToAdd.Count == 0) continue;
+
+                        if (_rowCache.TryGetValue(kvp.Key, out var targetCollection))
+                        {
+                            // 이미 UI 스레드이므로 Lock 없이도 안전하나, 
+                            // EnableCollectionSynchronization과의 호환성을 위해 Lock 유지 또는 그대로 Add
+                            // 성능을 위해 루프만 돕니다. (UI 스레드 로컬 작업이라 매우 빠름)
+                            foreach (var item in rowsToAdd)
+                            {
+                                targetCollection.Add(item);
+                            }
+                        }
+                    }
+                }), System.Windows.Threading.DispatcherPriority.Background);
             }
         }
 
