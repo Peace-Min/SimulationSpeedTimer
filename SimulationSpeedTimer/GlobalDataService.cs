@@ -122,6 +122,7 @@ namespace SimulationSpeedTimer
             private CancellationTokenSource _cts;
             private BlockingCollection<double> _timeBuffer;
             private SimulationSchema _schema;
+            private int _yieldCounter = 0;
 
             // 정상 종료 콜백 (Stop 호출 시 null 처리됨)
             private volatile Action _completionCallback;
@@ -255,6 +256,13 @@ namespace SimulationSpeedTimer
                             {
                                 // [정상 진행] 격차가 크지 않으면 다음 체크포인트로 1단계만 전진
                                 nextCheckpoint = Math.Round(nextCheckpoint + _config.QueryInterval, 1);
+                            }
+
+                            // [Writer 기아 방지] 주기적으로 Sleep하여 Writer가 Checkpoint를 수행할 틈을 줍니다.
+                            // 50번 쿼리(약 5초 데이터)마다 10ms 양보
+                            if (++_yieldCounter % 50 == 0)
+                            {
+                                Thread.Sleep(10);
                             }
                         }
 
@@ -579,7 +587,9 @@ namespace SimulationSpeedTimer
                 {
                     using (var cmd = conn.CreateCommand())
                     {
-                        cmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+                        // [수정] TRUNCATE는 Writer와 충돌 가능성이 높으므로, PASSIVE(안전 모드)로 변경
+                        // Writer가 이미 정리했거나, 파일이 잠겨있으면 무리하게 시도하지 않음.
+                        cmd.CommandText = "PRAGMA wal_checkpoint(PASSIVE);";
                         cmd.ExecuteNonQuery();
                     }
                 }
