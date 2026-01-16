@@ -65,6 +65,15 @@ namespace SimulationSpeedTimer
         {
             SimulationContext.Instance.OnSessionStarted += HandleSessionStarted;
             SimulationContext.Instance.OnSessionStopped += HandleSessionStopped;
+
+            // [이벤트 구독] 뷰모델 수명주기 내내 유지
+            SharedFrameRepository.Instance.OnFramesAdded += HandleFramesAdded;
+
+            // [UI 최적화] 렌더링 부하를 줄이기 위한 Throttling Timer (10Hz)
+            _uiRefreshTimer = new DispatcherTimer(DispatcherPriority.Render);
+            _uiRefreshTimer.Interval = TimeSpan.FromMilliseconds(50);
+            _uiRefreshTimer.Tick += OnUIRefreshTimerTick;
+            _uiRefreshTimer.Start();
         }
 
         // --- 외부 주입 메서드 ---
@@ -76,6 +85,7 @@ namespace SimulationSpeedTimer
             TableNames.Clear();
             _columnCache.Clear();
             _rowCache.Clear();
+            _pendingBuffer.Clear(); // 설정 초기화 시 버퍼도 비움
 
             foreach (var cfg in configs)
             {
@@ -121,36 +131,34 @@ namespace SimulationSpeedTimer
         {
             _currentSessionId = sessionId;
 
-            // 데이터 초기화 (구조는 유지)
-            foreach (var kvp in _rowCache)
-            {
-                kvp.Value.Clear();
-            }
+            // [UI 초기화] 새 세션 시작 시 이전 데이터 잔재(Buffer & UI)를 완벽히 소거
 
-            SharedFrameRepository.Instance.OnFramesAdded -= HandleFramesAdded;
-            SharedFrameRepository.Instance.OnFramesAdded += HandleFramesAdded;
+            // 1. 대기열(Buffer) 비우기
+            foreach (var queue in _pendingBuffer.Values)
+            {
+                while (queue.TryDequeue(out _)) ;
+            }
+            _pendingBuffer.Clear();
+
+            // 2. 화면(Grid) 비우기
+            foreach (var collection in _rowCache.Values)
+            {
+                collection.Clear();
+            }
         }
 
         private void HandleSessionStopped()
         {
-            SharedFrameRepository.Instance.OnFramesAdded -= HandleFramesAdded;
-            // 락 해제 등이 필요한 경우 여기서 처리 (보통 GC에 맡김)
+            // [잔여 데이터 수신 허용]
+            // Stop 버튼을 눌러도 GlobalDataService가 마지막 데이터를 보낼 수 있으므로
+            // 여기서 이벤트 핸들러를 해제하지 않습니다. (_currentSessionId는 그대로 유지)
         }
 
         // [안티그래비티 패턴] 백그라운드 데이터 버퍼 & UI 갱신 타이머
         private readonly ConcurrentDictionary<string, ConcurrentQueue<System.Dynamic.ExpandoObject>> _pendingBuffer = new ConcurrentDictionary<string, ConcurrentQueue<System.Dynamic.ExpandoObject>>();
         private readonly DispatcherTimer _uiRefreshTimer;
 
-        public TableDataViewModel()
-        {
-            // ... (기존 생성자 로직 유지) ...
 
-            // [UI 최적화] 렌더링 부하를 줄이기 위한 Throttling Timer (10Hz)
-            _uiRefreshTimer = new DispatcherTimer(DispatcherPriority.Render);
-            _uiRefreshTimer.Interval = TimeSpan.FromMilliseconds(50); // 반응성을 위해 50ms (20FPS) 정도로 상향 조정 가능
-            _uiRefreshTimer.Tick += OnUIRefreshTimerTick;
-            _uiRefreshTimer.Start();
-        }
 
         private void HandleFramesAdded(List<SimulationFrame> frames, Guid sessionId)
         {
