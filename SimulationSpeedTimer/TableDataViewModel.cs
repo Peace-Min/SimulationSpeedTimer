@@ -15,9 +15,9 @@ namespace SimulationSpeedTimer
 
         // [UI 바인딩 소스] 
         // 테이블 목록 (콤보박스용)
-        public System.Collections.ObjectModel.ObservableCollection<string> TableNames { get; } 
+        public System.Collections.ObjectModel.ObservableCollection<string> TableNames { get; }
             = new System.Collections.ObjectModel.ObservableCollection<string>();
-        
+
         // 현재 선택된 테이블 이름
         private string _selectedTableName;
         public string SelectedTableName
@@ -38,19 +38,19 @@ namespace SimulationSpeedTimer
         public System.Collections.ObjectModel.ObservableCollection<GridColumnItem> Columns
         {
             get => !string.IsNullOrEmpty(_selectedTableName) && _columnCache.ContainsKey(_selectedTableName)
-                ? _columnCache[_selectedTableName] 
+                ? _columnCache[_selectedTableName]
                 : null;
         }
 
         public System.Collections.ObjectModel.ObservableCollection<System.Dynamic.ExpandoObject> Items
         {
             get => !string.IsNullOrEmpty(_selectedTableName) && _rowCache.ContainsKey(_selectedTableName)
-                ? _rowCache[_selectedTableName] 
+                ? _rowCache[_selectedTableName]
                 : null;
         }
 
         // --- 내부 캐시 저장소 ---
-        private readonly Dictionary<string, System.Collections.ObjectModel.ObservableCollection<GridColumnItem>> _columnCache 
+        private readonly Dictionary<string, System.Collections.ObjectModel.ObservableCollection<GridColumnItem>> _columnCache
             = new Dictionary<string, System.Collections.ObjectModel.ObservableCollection<GridColumnItem>>();
 
         // [핵심 데이터 저장소] Key: 테이블명, Value: 동적 행 데이터 리스트 (ExpandoObject)
@@ -80,13 +80,13 @@ namespace SimulationSpeedTimer
             foreach (var cfg in configs)
             {
                 TableNames.Add(cfg.TableName);
-                
+
                 // 1. 행 데이터 컬렉션 생성
                 var rows = new System.Collections.ObjectModel.ObservableCollection<System.Dynamic.ExpandoObject>();
-                
+
                 // WPF 백그라운드 스레드 업데이트 지원 설정
                 BindingOperations.EnableCollectionSynchronization(rows, _collectionLock);
-                
+
                 _rowCache[cfg.TableName] = rows;
 
                 // 2. 컬럼 구성: Time(고정) + 설정값
@@ -120,9 +120,9 @@ namespace SimulationSpeedTimer
         private void HandleSessionStarted(Guid sessionId)
         {
             _currentSessionId = sessionId;
-            
+
             // 데이터 초기화 (구조는 유지)
-            foreach(var kvp in _rowCache)
+            foreach (var kvp in _rowCache)
             {
                 kvp.Value.Clear();
             }
@@ -137,71 +137,79 @@ namespace SimulationSpeedTimer
             // 락 해제 등이 필요한 경우 여기서 처리 (보통 GC에 맡김)
         }
 
+        // [안티그래비티 패턴] 백그라운드 데이터 버퍼 & UI 갱신 타이머
+        private readonly ConcurrentDictionary<string, ConcurrentQueue<System.Dynamic.ExpandoObject>> _pendingBuffer = new ConcurrentDictionary<string, ConcurrentQueue<System.Dynamic.ExpandoObject>>();
+        private readonly DispatcherTimer _uiRefreshTimer;
+
+        public TableDataViewModel()
+        {
+            // ... (기존 생성자 로직 유지) ...
+
+            // [UI 최적화] 렌더링 부하를 줄이기 위한 Throttling Timer (10Hz)
+            _uiRefreshTimer = new DispatcherTimer(DispatcherPriority.Render);
+            _uiRefreshTimer.Interval = TimeSpan.FromMilliseconds(50); // 반응성을 위해 50ms (20FPS) 정도로 상향 조정 가능
+            _uiRefreshTimer.Tick += OnUIRefreshTimerTick;
+            _uiRefreshTimer.Start();
+        }
+
         private void HandleFramesAdded(List<SimulationFrame> frames, Guid sessionId)
         {
             if (_currentSessionId != sessionId) return;
 
-            // [Step 1: Background Thread] 데이터 변환 및 배치 준비
-            // UI 스레드 개입 없이 순수 CPU 연산으로 데이터를 미리 가공합니다.
-            // Key: TableName, Value: 추가할 Row 리스트
-            var batchBuffer = new Dictionary<string, List<System.Dynamic.ExpandoObject>>();
-            
-            // 관리 중인 테이블 키 미리 확보 (Thread-Safe Access pattern 필요 시 복사 사용)
-            var targetTables = _rowCache.Keys.ToList();
-            foreach(var tb in targetTables) batchBuffer[tb] = new List<System.Dynamic.ExpandoObject>();
-
+            // [Step 1: Background Thread] Non-blocking Output
+            // UI 스레드를 괴롭히지 않고, 데이터를 메모리 큐에 적재만 합니다.
             foreach (var frame in frames)
             {
-                foreach (var tableName in targetTables)
+                // 현재 관리 중인 테이블에 대해서만 처리
+                foreach (var tableName in _rowCache.Keys)
                 {
                     var tableData = frame.GetTable(tableName);
                     if (tableData != null)
                     {
-                        // Row 객체 생성 (ExpandoObject)
-                        var row = new System.Dynamic.ExpandoObject();
-                        var dict = (IDictionary<string, object>)row;
+                        var row = CreateExpandoRow(frame, tableData);
 
-                        // 1. Time
-                        dict["Time"] = frame.Time;
-
-                        // 2. Columns
-                        foreach (var colName in tableData.ColumnNames)
-                        {
-                            dict[colName] = tableData[colName];
-                        }
-
-                        // 3. 임시 버퍼에 저장 (메인 스레드 호출 아님)
-                        batchBuffer[tableName].Add(row);
+                        // 큐에 안전하게 투입 (Lock-free)
+                        var queue = _pendingBuffer.GetOrAdd(tableName, _ => new ConcurrentQueue<System.Dynamic.ExpandoObject>());
+                        queue.Enqueue(row);
                     }
                 }
             }
+        }
 
-            // [Step 2: UI Thread] 일괄 업데이트 (Batch Update)
-            // 데이터가 있는 경우에만, 단 한 번의 Dispatcher 호출로 처리합니다.
-            // 이렇게 하면 N개의 마샬링 비용이 1로 줄어들어 UI 끊김이 사라집니다.
-            bool hasData = batchBuffer.Any(x => x.Value.Count > 0);
-            if (hasData)
+        private System.Dynamic.ExpandoObject CreateExpandoRow(SimulationFrame frame, SimulationTable tableData)
+        {
+            var row = new System.Dynamic.ExpandoObject();
+            var dict = (IDictionary<string, object>)row;
+
+            dict["Time"] = frame.Time;
+            foreach (var colName in tableData.ColumnNames)
             {
-                System.Windows.Application.Current.Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    // UI 스레드 내부 진입
-                    foreach (var kvp in batchBuffer)
-                    {
-                        var rowsToAdd = kvp.Value;
-                        if (rowsToAdd.Count == 0) continue;
+                dict[colName] = tableData[colName];
+            }
+            return row;
+        }
 
-                        if (_rowCache.TryGetValue(kvp.Key, out var targetCollection))
-                        {
-                            // 이미 UI 스레드이므로 Lock 없이도 안전하나, 
-                            // EnableCollectionSynchronization과의 호환성을 위해 Lock 유지 또는 그대로 Add
-                            // 성능을 위해 루프만 돕니다. (UI 스레드 로컬 작업이라 매우 빠름)
-                            foreach (var item in rowsToAdd)
-                            {
-                                targetCollection.Add(item);
-                            }
-                        }
+        // [Step 2: UI Thread] Periodic Batch Update
+        private void OnUIRefreshTimerTick(object sender, EventArgs e)
+        {
+            // 쌓인 데이터가 없으면 빠른 리턴
+            if (_pendingBuffer.IsEmpty || _pendingBuffer.Values.All(q => q.IsEmpty)) return;
+
+            foreach (var kvp in _pendingBuffer)
+            {
+                if (kvp.Value.IsEmpty) continue;
+
+                if (_rowCache.TryGetValue(kvp.Key, out var targetCollection))
+                {
+                    // [Batch Add] 
+                    // 한 번의 타이머 틱 동안 쌓인 모든 데이터를 해당 컬렉션에 털어넣습니다.
+                    // UI 스레드에서 직접 수행되므로 별도의 잠금 없이도 안전하지만, 
+                    // BindingOperations.EnableCollectionSynchronization을 사용 중이라면 내부적으로 잠금이 걸릴 수 있습니다.
+                    while (kvp.Value.TryDequeue(out var item))
+                    {
+                        targetCollection.Add(item);
                     }
-                }), System.Windows.Threading.DispatcherPriority.Background);
+                }
             }
         }
 
