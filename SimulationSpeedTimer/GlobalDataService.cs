@@ -34,7 +34,7 @@ namespace SimulationSpeedTimer
             public double QueryInterval { get; set; } = 1.0;
             public int RetryCount { get; set; } = 3;
             public int RetryIntervalMs { get; set; } = 10;
-            
+
             /// <summary>
             /// [Optional] 각 테이블(논리명)별 기대되는 컬럼 개수 
             /// Key: ObjectName (예: "SAM001"), Value: ColumnCount
@@ -61,7 +61,7 @@ namespace SimulationSpeedTimer
             if (sessionId == Guid.Empty)
             {
                 // [Feedback] Context가 시작되지 않은 상태에서의 서비스 시작은 불허 (엄격한 생명주기 준수)
-                throw new InvalidOperationException("[GlobalDataService] Cannot start service: SimulationContext is not active (SessionId is Empty). Please call SimulationContext.Start() first."); 
+                throw new InvalidOperationException("[GlobalDataService] Cannot start service: SimulationContext is not active (SessionId is Empty). Please call SimulationContext.Start() first.");
             }
 
             // 3. 새 세션 생성 및 시작
@@ -114,6 +114,9 @@ namespace SimulationSpeedTimer
         {
             public Guid Id { get; }
             private readonly GlobalDataServiceConfig _config;
+
+            // [상수] 부동소수점 조회의 경계값을 포함하기 위한 마진 (1마이크로초)
+            private const double QueryMargin = 0.000001;
 
             private Task _workerTask;
             private CancellationTokenSource _cts;
@@ -216,28 +219,42 @@ namespace SimulationSpeedTimer
 
                         if (time >= nextCheckpoint)
                         {
-                            double rangeStart = nextCheckpoint - _config.QueryInterval;
+                            // [수정] 이전 처리 종료 시점(lastQueryEndTime)부터 처리를 시작해야 중복/누락이 없음
+                            double rangeStart = lastQueryEndTime;
                             double rangeEnd = nextCheckpoint;
 
                             ProcessRange(connection, rangeStart, rangeEnd, token);
 
-                            lastQueryEndTime = nextCheckpoint;
-                                // [루프 최적화: Fast-Forward]
-                                // 데이터가 밀려서 수신된 시간(time)과 현재 처리 시점(nextCheckpoint)의 격차가 큰 경우(예: 0.2 -> 0.9),
-                                // 0.1초씩 루프를 돌며 처리하는 대신, 격차만큼 한 번에 건너뛰어 최신 시점을 즉시 따라잡습니다.
-                                // [루프 최적화: Fast-Forward]
-                                // 데이터가 밀려서 수신된 시간(time)과 현재 처리 시점(nextCheckpoint)의 격차가 큰 경우,
-                                // 루프를 돌지 않고 한 번에 처리(Range Query) 후 인덱스를 점프합니다.
-                                double gap = time - nextCheckpoint;
-                                if (gap > _config.QueryInterval) // 격차가 1 Interval보다 클 때만 수행
-                                {
+                            // [수정] 처리가 완료된 'rangeEnd'로 갱신 (의미론적 명확성 및 Fast-Forward 버그 해결을 위한 기반)
+                            lastQueryEndTime = rangeEnd;
+                            // [루프 최적화: Fast-Forward]
+                            // 데이터가 밀려서 수신된 시간(time)과 현재 처리 시점(nextCheckpoint)의 격차가 큰 경우(예: 0.2 -> 0.9),
+                            // 0.1초씩 루프를 돌며 처리하는 대신, 격차만큼 한 번에 건너뛰어 최신 시점을 즉시 따라잡습니다.
+                            // [루프 최적화: Fast-Forward]
+                            // 데이터가 밀려서 수신된 시간(time)과 현재 처리 시점(nextCheckpoint)의 격차가 큰 경우,
+                            // 루프를 돌지 않고 한 번에 처리(Range Query) 후 인덱스를 점프합니다.
+                            double gap = time - nextCheckpoint;
+                            if (gap > _config.QueryInterval) // 격차가 1 Interval보다 클 때만 수행
+                            {
+                                // [수정] Fast-Forward 시, time 지점의 데이터도 포함해서 처리해야 하므로 Margin을 더해줍니다.
+                                // 또한 다음 Loop 시작점(lastQueryEndTime)도 이 Margin이 더해진 값이어야 중복 조회가 발생하지 않습니다.
+                                double safeEndTime = time + QueryMargin;
+
                                 // 점프할 구간의 데이터를 통째로 처리 (데이터 누락 방지)
-                                ProcessRange(connection, nextCheckpoint, time, token);
+                                ProcessRange(connection, nextCheckpoint, safeEndTime, token);
+
+                                // [수정] Fast-Forward로 처리된 구간까지 lastQueryEndTime 갱신 (중복 처리 방지)
+                                lastQueryEndTime = safeEndTime;
 
                                 // 인덱스 이동 (time 바로 다음 Interval로 맞춤)
                                 // 예: time=100.5, interval=0.5 -> nextCheckpoint를 101.0으로 설정
                                 int jumps = (int)Math.Floor((time - nextCheckpoint) / _config.QueryInterval) + 1;
-                                nextCheckpoint += jumps * _config.QueryInterval;
+                                nextCheckpoint = Math.Round(nextCheckpoint + jumps * _config.QueryInterval, 1);
+                            }
+                            else
+                            {
+                                // [정상 진행] 격차가 크지 않으면 다음 체크포인트로 1단계만 전진
+                                nextCheckpoint = Math.Round(nextCheckpoint + _config.QueryInterval, 1);
                             }
                         }
 
@@ -247,7 +264,9 @@ namespace SimulationSpeedTimer
                     // 4. 잔여 데이터 루프 (Graceful Shutdown)
                     if (lastSeenTime > lastQueryEndTime)
                     {
-                        ProcessRange(connection, lastQueryEndTime, lastSeenTime, token);
+                        // Stop이 호출되어 token이 취소된 상태일 수 있으므로, 잔여 데이터 처리는 취소 없이 수행합니다.
+                        // [수정] 마지막 데이터(lastSeenTime)가 포함되도록 Margin 추가
+                        ProcessRange(connection, lastQueryEndTime, lastSeenTime + QueryMargin, CancellationToken.None);
                     }
                 }
                 catch (OperationCanceledException) { }
@@ -364,8 +383,8 @@ namespace SimulationSpeedTimer
 
                                     // [네이밍 변환] Object_Info의 논리적 이름(ObjectName)으로 매핑하여 저장
                                     // 예: Object_Table_0 -> SAM001
-                                    string resolvedName = !string.IsNullOrEmpty(tableInfo.ObjectName) 
-                                        ? tableInfo.ObjectName 
+                                    string resolvedName = !string.IsNullOrEmpty(tableInfo.ObjectName)
+                                        ? tableInfo.ObjectName
                                         : tableInfo.TableName;
 
                                     var tableData = new SimulationTable(resolvedName);
@@ -435,7 +454,7 @@ namespace SimulationSpeedTimer
                 return null;
             }
 
-            private SimulationSchema                                                                                                                                    WaitForSchemaReady(SQLiteConnection conn, CancellationToken token)
+            private SimulationSchema WaitForSchemaReady(SQLiteConnection conn, CancellationToken token)
             {
                 while (!token.IsCancellationRequested)
                 {
@@ -520,7 +539,7 @@ namespace SimulationSpeedTimer
                             // 2. 컬럼 수량 정합성 확인
                             // 물리 테이블의 총 컬럼 수 (s_time 포함)
                             int physicalTotalCount = actualColumns.Count;
-                            
+
                             // 메타데이터에 정의된 데이터 컬럼 수 (s_time 미포함)
                             int metaDataCount = tableInfo.ColumnsByPhysicalName.Count;
 
@@ -528,12 +547,12 @@ namespace SimulationSpeedTimer
                             // Key: 논리적 이름 (ObjectName, 예: "SAM001")
                             string logicalName = tableInfo.ObjectName;
 
-                            if (_config.ExpectedColumnCounts != null && 
+                            if (_config.ExpectedColumnCounts != null &&
                                 !string.IsNullOrEmpty(logicalName) &&
                                 _config.ExpectedColumnCounts.TryGetValue(logicalName, out int expectedTotalCount))
                             {
                                 // Config에는 "s_time을 포함한 전체 물리 컬럼 개수"가 들어온다고 가정 (예: 51)
-                                
+
                                 // A. 물리 테이블이 아직 다 안 만들어졌으면 false
                                 if (physicalTotalCount != expectedTotalCount) return false;
 
