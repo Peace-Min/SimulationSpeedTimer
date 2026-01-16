@@ -26,11 +26,30 @@ namespace SimulationSpeedTimer
         private GlobalDataService() { }
 
         /// <summary>
+        /// 서비스 설정 객체
+        /// </summary>
+        public class GlobalDataServiceConfig
+        {
+            public string DbPath { get; set; }
+            public double QueryInterval { get; set; } = 1.0;
+            public int RetryCount { get; set; } = 3;
+            public int RetryIntervalMs { get; set; } = 10;
+            
+            /// <summary>
+            /// [Optional] 각 테이블(논리명)별 기대되는 컬럼 개수 
+            /// Key: ObjectName (예: "SAM001"), Value: ColumnCount
+            /// </summary>
+            public Dictionary<string, int> ExpectedColumnCounts { get; set; } = new Dictionary<string, int>();
+        }
+
+        /// <summary>
         /// 서비스 시작 (1 Run = 1 Session Instance)
         /// Start() 호출 시점에는 이미 SimulationContext가 초기화되어 있다고 가정
         /// </summary>
-        public void Start(string dbPath, double queryInterval = 1.0, int retryCount = 3, int retryIntervalMs = 10)
+        public void Start(GlobalDataServiceConfig config)
         {
+            if (config == null) throw new ArgumentNullException(nameof(config));
+
             // 1. 이전 세션 정리 (Non-blocking)
             // UI가 Stop을 먼저 불렀음을 신뢰하지만, 혹시 모르니 null 처리
             var oldSession = _currentSession;
@@ -42,11 +61,11 @@ namespace SimulationSpeedTimer
             if (sessionId == Guid.Empty)
             {
                 // [Feedback] Context가 시작되지 않은 상태에서의 서비스 시작은 불허 (엄격한 생명주기 준수)
-                throw new InvalidOperationException("[GlobalDataService] Cannot start service: SimulationContext is not active (SessionId is Empty). Please call SimulationContext.Start() first.");
+                throw new InvalidOperationException("[GlobalDataService] Cannot start service: SimulationContext is not active (SessionId is Empty). Please call SimulationContext.Start() first."); 
             }
 
             // 3. 새 세션 생성 및 시작
-            var newSession = new DataSession(sessionId, dbPath, queryInterval, retryCount, retryIntervalMs);
+            var newSession = new DataSession(sessionId, config);
 
             // 이벤트 연결
             newSession.OnChunkProcessed += (chunk) => _onChunkProcessed?.Invoke(chunk);
@@ -54,7 +73,7 @@ namespace SimulationSpeedTimer
             _currentSession = newSession;
             _currentSession.Run();
 
-            Console.WriteLine($"[GlobalDataService] New Session Started: {sessionId} (Path: {dbPath})");
+            Console.WriteLine($"[GlobalDataService] New Session Started: {sessionId} (Path: {config.DbPath})");
         }
 
         /// <summary>
@@ -94,10 +113,7 @@ namespace SimulationSpeedTimer
         private class DataSession
         {
             public Guid Id { get; }
-            private readonly string _dbPath;
-            private readonly double _queryInterval;
-            private readonly int _retryCount;
-            private readonly int _retryIntervalMs;
+            private readonly GlobalDataServiceConfig _config;
 
             private Task _workerTask;
             private CancellationTokenSource _cts;
@@ -110,13 +126,10 @@ namespace SimulationSpeedTimer
             // 이벤트 Hooks
             public event Action<Dictionary<double, SimulationFrame>> OnChunkProcessed;
 
-            public DataSession(Guid id, string dbPath, double queryInterval, int retryCount, int retryIntervalMs)
+            public DataSession(Guid id, GlobalDataServiceConfig config)
             {
                 Id = id;
-                _dbPath = dbPath;
-                _queryInterval = queryInterval;
-                _retryCount = retryCount;
-                _retryIntervalMs = retryIntervalMs;
+                _config = config;
                 _timeBuffer = new BlockingCollection<double>(boundedCapacity: 1000);
                 _cts = new CancellationTokenSource();
             }
@@ -193,7 +206,7 @@ namespace SimulationSpeedTimer
                     Console.WriteLine($"[{Id}] Ready to process frames.");
 
                     // 3. 데이터 소비 루프
-                    double nextCheckpoint = _queryInterval;
+                    double nextCheckpoint = _config.QueryInterval;
                     double lastQueryEndTime = 0.0;
                     double lastSeenTime = 0.0;
 
@@ -203,7 +216,7 @@ namespace SimulationSpeedTimer
 
                         if (time >= nextCheckpoint)
                         {
-                            double rangeStart = nextCheckpoint - _queryInterval;
+                            double rangeStart = nextCheckpoint - _config.QueryInterval;
                             double rangeEnd = nextCheckpoint;
 
                             ProcessRange(connection, rangeStart, rangeEnd, token);
@@ -216,15 +229,15 @@ namespace SimulationSpeedTimer
                                 // 데이터가 밀려서 수신된 시간(time)과 현재 처리 시점(nextCheckpoint)의 격차가 큰 경우,
                                 // 루프를 돌지 않고 한 번에 처리(Range Query) 후 인덱스를 점프합니다.
                                 double gap = time - nextCheckpoint;
-                                if (gap > _queryInterval) // 격차가 1 Interval보다 클 때만 수행
+                                if (gap > _config.QueryInterval) // 격차가 1 Interval보다 클 때만 수행
                                 {
                                 // 점프할 구간의 데이터를 통째로 처리 (데이터 누락 방지)
                                 ProcessRange(connection, nextCheckpoint, time, token);
 
                                 // 인덱스 이동 (time 바로 다음 Interval로 맞춤)
                                 // 예: time=100.5, interval=0.5 -> nextCheckpoint를 101.0으로 설정
-                                int jumps = (int)Math.Floor((time - nextCheckpoint) / _queryInterval) + 1;
-                                nextCheckpoint += jumps * _queryInterval;
+                                int jumps = (int)Math.Floor((time - nextCheckpoint) / _config.QueryInterval) + 1;
+                                nextCheckpoint += jumps * _config.QueryInterval;
                             }
                         }
 
@@ -272,8 +285,8 @@ namespace SimulationSpeedTimer
             {
                 try
                 {
-                    string walPath = _dbPath + "-wal";
-                    string shmPath = _dbPath + "-shm";
+                    string walPath = _config.DbPath + "-wal";
+                    string shmPath = _config.DbPath + "-shm";
                     if (System.IO.File.Exists(walPath)) System.IO.File.Delete(walPath);
                     if (System.IO.File.Exists(shmPath)) System.IO.File.Delete(shmPath);
                 }
@@ -298,7 +311,7 @@ namespace SimulationSpeedTimer
             private Dictionary<double, SimulationFrame> FetchAllTablesRangeWithRetry(SQLiteConnection conn, double start, double end, CancellationToken token)
             {
                 int attemptCount = 0;
-                int maxAttempts = _retryCount + 1;
+                int maxAttempts = _config.RetryCount + 1;
 
                 while (attemptCount < maxAttempts && !token.IsCancellationRequested)
                 {
@@ -316,7 +329,7 @@ namespace SimulationSpeedTimer
 
                     if (attemptCount < maxAttempts)
                     {
-                        Thread.Sleep(_retryIntervalMs);
+                        Thread.Sleep(_config.RetryIntervalMs);
                     }
                 }
                 return new Dictionary<double, SimulationFrame>();
@@ -411,7 +424,7 @@ namespace SimulationSpeedTimer
                 {
                     try
                     {
-                        var builder = new SQLiteConnectionStringBuilder { DataSource = _dbPath, Pooling = false, FailIfMissing = true };
+                        var builder = new SQLiteConnectionStringBuilder { DataSource = _config.DbPath, Pooling = false, FailIfMissing = true };
                         var conn = new SQLiteConnection(builder.ToString());
                         conn.Open();
                         return conn;
@@ -487,17 +500,53 @@ namespace SimulationSpeedTimer
             {
                 try
                 {
+                    // 테이블이 하나도 없는 경우도 아직 로딩 전으로 간주
+                    if (schema.Tables == null || !schema.Tables.Any()) return false;
+
                     foreach (var tableInfo in schema.Tables)
                     {
                         using (var cmd = conn.CreateCommand())
                         {
                             cmd.CommandText = $"PRAGMA table_info({tableInfo.TableName})";
-                            var actualColumns = new HashSet<string>();
+                            var actualColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                             using (var reader = cmd.ExecuteReader())
                             {
                                 while (reader.Read()) actualColumns.Add(reader["name"]?.ToString());
                             }
+
+                            // 1. 필수 시스템 컬럼 확인 (s_time)
                             if (!actualColumns.Contains("s_time")) return false;
+
+                            // 2. 컬럼 수량 정합성 확인
+                            // 물리 테이블의 총 컬럼 수 (s_time 포함)
+                            int physicalTotalCount = actualColumns.Count;
+                            
+                            // 메타데이터에 정의된 데이터 컬럼 수 (s_time 미포함)
+                            int metaDataCount = tableInfo.ColumnsByPhysicalName.Count;
+
+                            // [신규 체크] 기대 컬럼 개수가 주어진 경우 (Strict Mode)
+                            // Key: 논리적 이름 (ObjectName, 예: "SAM001")
+                            string logicalName = tableInfo.ObjectName;
+
+                            if (_config.ExpectedColumnCounts != null && 
+                                !string.IsNullOrEmpty(logicalName) &&
+                                _config.ExpectedColumnCounts.TryGetValue(logicalName, out int expectedTotalCount))
+                            {
+                                // Config에는 "s_time을 포함한 전체 물리 컬럼 개수"가 들어온다고 가정 (예: 51)
+                                
+                                // A. 물리 테이블이 아직 다 안 만들어졌으면 false
+                                if (physicalTotalCount != expectedTotalCount) return false;
+
+                                // B. 메타데이터가 아직 다 로드 안 됐으면 false
+                                // (메타데이터 50개 + 암묵적 s_time 1개 = 51개여야 함)
+                                if ((metaDataCount + 1) != expectedTotalCount) return false;
+                            }
+                            else
+                            {
+                                // [기존 Fallback] 기대 개수가 없으면, 물리 테이블과 메타데이터 간의 동기화 여부만 체크
+                                // 물리(51) == 메타(50) + 1
+                                if (physicalTotalCount != (metaDataCount + 1)) return false;
+                            }
                         }
                     }
                     return true;

@@ -40,8 +40,13 @@ namespace SimulationSpeedTimer.Tests
             // Context Start (Generates Session ID)
             SimulationContext.Instance.Start(); // No args
 
-            // Service Start (Wait for Schema is included in worker loop)
-            GlobalDataService.Instance.Start(TestDbPath, queryInterval: 0.5);
+            // Service Start
+            var gdConfig = new GlobalDataService.GlobalDataServiceConfig
+            {
+                DbPath = TestDbPath,
+                QueryInterval = 0.5
+            };
+            GlobalDataService.Instance.Start(gdConfig);
 
             Console.WriteLine("[Phase 1] Data Integrity Check (Sparse Data)");
             // Scenario: 0.0(Data), 0.5(Empty), 1.0(Data)

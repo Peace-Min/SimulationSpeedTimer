@@ -48,7 +48,8 @@ namespace SimulationSpeedTimer.Tests
                 SimulationContext.Instance.Start();
                 var sessionA_Id = SimulationContext.Instance.CurrentSessionId;
                 
-                GlobalDataService.Instance.Start(dbPathA, queryInterval: 0.1);
+                var configA = new GlobalDataService.GlobalDataServiceConfig { DbPath = dbPathA, QueryInterval = 0.1 };
+                GlobalDataService.Instance.Start(configA);
 
                 // Inject Data A
                 Console.WriteLine("2. Injecting 10 frames to Session A...");
@@ -75,7 +76,8 @@ namespace SimulationSpeedTimer.Tests
                 
                 if (sessionA_Id == sessionB_Id) throw new Exception("Session IDs must be different!");
                 
-                GlobalDataService.Instance.Start(dbPathB, queryInterval: 0.1);
+                var configB = new GlobalDataService.GlobalDataServiceConfig { DbPath = dbPathB, QueryInterval = 0.1 };
+                GlobalDataService.Instance.Start(configB);
 
                 // Inject Data B (Use different time range to detect mixing)
                 // Session A는 0.0~0.9이고, Session B는 100.0~100.9를 사용.
@@ -143,7 +145,8 @@ namespace SimulationSpeedTimer.Tests
             try
             {
                 SimulationContext.Instance.Start();
-                GlobalDataService.Instance.Start(dbPath, queryInterval: 0.1);
+                var config = new GlobalDataService.GlobalDataServiceConfig { DbPath = dbPath, QueryInterval = 0.1 };
+                GlobalDataService.Instance.Start(config);
 
                 // 1. Data Injection
                 for (int i = 0; i < 50; i++) GlobalDataService.Instance.EnqueueTime(i * 0.1);
