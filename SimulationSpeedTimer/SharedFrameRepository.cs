@@ -19,13 +19,13 @@ namespace SimulationSpeedTimer
 
         // 핵심 저장소: Key = Time, Value = Frame
         private readonly ConcurrentDictionary<double, SimulationFrame> _frames;
-        
+
         // 시간 순서 유지 (빠른 범위 조회용)
         private readonly SortedSet<double> _timeIndex;
-        
+
         // 동기화 (SortedSet은 thread-safe하지 않음)
         private readonly ReaderWriterLockSlim _lock;
-        
+
         // 슬라이딩 윈도우 설정 (메모리 관리)
         private double _maxWindowSize = 60.0; // 최근 60초만 유지
 
@@ -74,14 +74,14 @@ namespace SimulationSpeedTimer
             try
             {
                 // 재검증 (Lock 획득 사이 변경 가능성)
-                 if (sessionId != _currentSessionId) return;
+                if (sessionId != _currentSessionId) return;
 
                 foreach (var kvp in chunk)
                 {
                     _frames[kvp.Key] = kvp.Value;
                     _timeIndex.Add(kvp.Key);
                 }
-                
+
                 // 슬라이딩 윈도우 적용 (오래된 데이터 제거)
                 CleanupOldFrames();
             }
@@ -128,9 +128,9 @@ namespace SimulationSpeedTimer
         /// 특정 테이블의 특정 컬럼 값 조회 (차트 데이터 추출)
         /// </summary>
         public List<(double Time, object Value)> GetColumnValues(
-            string tableName, 
-            string columnName, 
-            double startTime, 
+            string tableName,
+            string columnName,
+            double startTime,
             double endTime)
         {
             _lock.EnterReadLock();
@@ -138,7 +138,7 @@ namespace SimulationSpeedTimer
             {
                 var result = new List<(double, object)>();
                 var times = _timeIndex.Where(t => t >= startTime && t <= endTime);
-                
+
                 foreach (var time in times)
                 {
                     if (_frames.TryGetValue(time, out var frame))
@@ -199,9 +199,9 @@ namespace SimulationSpeedTimer
                 _frames.Clear();
                 _timeIndex.Clear();
                 _currentSessionId = sessionId; // 주입받은 ID 사용
-                
-                // 스키마 정보도 초기화 (필요하다면)
-                // Schema = null; 
+
+                // 스키마 정보도 초기화 (이전 세션의 스키마 잔재 제거)
+                Schema = null;
             }
             finally
             {
@@ -215,10 +215,10 @@ namespace SimulationSpeedTimer
         private void CleanupOldFrames()
         {
             if (_timeIndex.Count == 0) return;
-            
+
             double latestTime = _timeIndex.Max;
             double cutoffTime = latestTime - _maxWindowSize;
-            
+
             var toRemove = _timeIndex.Where(t => t < cutoffTime).ToList();
             foreach (var time in toRemove)
             {
