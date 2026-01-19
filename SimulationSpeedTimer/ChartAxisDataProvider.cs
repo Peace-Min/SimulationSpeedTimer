@@ -14,7 +14,8 @@ namespace SimulationSpeedTimer
         private List<DatabaseQueryConfig> _configs = new List<DatabaseQueryConfig>();
 
         // UI 갱신 델리게이트 (외부에서 설정)
-        public Action<double, double, double> OnDataUpdated; 
+        // Time, X-Value, Y-Values (Key: SeriesName)
+        public Action<double, double, Dictionary<string, double>> OnDataUpdated; 
 
         private ChartAxisDataProvider()
         {
@@ -70,19 +71,48 @@ namespace SimulationSpeedTimer
 
             foreach (var config in _configs)
             {
-                // Inner Join Logic:
-                // X축 데이터와 Y축 데이터가 *모두* 존재해야만 유효한 시뮬레이션 데이터로 간주합니다.
-                
-                // Config에 있는 논리적 이름(예: SAM001, Velocity)으로 직접 조회
-                double? xVal = GetValue(frame, config.XAxisObjectName, config.XAxisAttributeName);
-                double? yVal = GetValue(frame, config.YAxisObjectName, config.YAxisAttributeName);
+                // 1. X축 데이터 조회 (필수)
+                // X축 SeriesItem 사용
+                double? xVal = GetValue(frame, config.XAxisSeries.ObjectName, config.XAxisSeries.AttributeName);
 
-                // 둘 중 하나라도 없으면 과감히 Skip (Partial Data 무시)
-                if (xVal.HasValue && yVal.HasValue)
+                if (!xVal.HasValue) continue; // X값이 없으면 해당 시점은 Skip
+
+                // 2. Y축 다중 시리즈 조회
+                var yValues = new Dictionary<string, double>();
+                
+                // X축이 시간(s_time)을 나타내는지 확인 (DB 스키마 상 보통 s_time이 시간 컬럼)
+                // 혹은 사용자가 config에 's_time'이라고 명시했을 경우를 상정
+                bool isXAxisTime = config.XAxisSeries.AttributeName.Equals("s_time", StringComparison.OrdinalIgnoreCase) 
+                                   || config.XAxisSeries.AttributeName.Equals("Time", StringComparison.OrdinalIgnoreCase);
+
+                foreach(var series in config.YAxisSeries)
                 {
-                    OnDataUpdated?.Invoke(frame.Time, xVal.Value, yVal.Value);
+                    // 키 생성: SeriesName이 있으면 사용하고, 없으면 Obj.Attr 형식으로 생성
+                    string key = !string.IsNullOrEmpty(series.SeriesName) 
+                        ? series.SeriesName 
+                        : $"{series.ObjectName}.{series.AttributeName}";
+
+                    double? yVal = GetValue(frame, series.ObjectName, series.AttributeName);
+                    
+                    if (yVal.HasValue)
+                    {
+                        yValues[key] = yVal.Value;
+                    }
+                    else if (isXAxisTime)
+                    {
+                        // [요청사항 반영]
+                        // 데이터가 없는데(else), X축이 시간축(s_time)이라면 
+                        // 연속성을 위해 NaN으로라도 채워서 보냅니다.
+                        yValues[key] = double.NaN;
+                    }
                 }
-                // else: 이 시간 프레임에는 해당 객체 데이터가 불완전함 (ex: 센서 A는 있는데 B는 없음)
+
+                // Inner Join Logic Variant:
+                // X축은 필수이고, Y축 데이터가 *하나라도* 존재(NaN 포함)하면 업데이트를 발생시킵니다.
+                if (yValues.Count > 0)
+                {
+                    OnDataUpdated?.Invoke(frame.Time, xVal.Value, yValues);
+                }
             }
         }
 

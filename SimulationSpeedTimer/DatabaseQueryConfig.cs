@@ -4,6 +4,27 @@ namespace SimulationSpeedTimer
     /// DB 조회를 위한 메타데이터 설정
     /// Object_Info, Column_Info 테이블에서 실제 테이블명/컬럼명을 조회하기 위한 정보만 포함
     /// </summary>
+    public class SeriesItem
+    {
+        public string ObjectName { get; set; }
+        public string AttributeName { get; set; }
+        public string SeriesName { get; set; }
+
+        public SeriesItem Clone()
+        {
+            return new SeriesItem
+            {
+                ObjectName = this.ObjectName,
+                AttributeName = this.AttributeName,
+                SeriesName = this.SeriesName
+            };
+        }
+    }
+
+    /// <summary>
+    /// DB 조회를 위한 메타데이터 설정
+    /// Object_Info, Column_Info 테이블에서 실제 테이블명/컬럼명을 조회하기 위한 정보만 포함
+    /// </summary>
     public class DatabaseQueryConfig
     {
         /// <summary>
@@ -12,24 +33,14 @@ namespace SimulationSpeedTimer
         public string DatabasePath { get; set; }
 
         /// <summary>
-        /// X축 데이터의 Object 이름 (Object_Info.object_name)
+        /// X축 데이터 설정 (SeriesItem 구조 사용)
         /// </summary>
-        public string XAxisObjectName { get; set; }
+        public SeriesItem XAxisSeries { get; set; } = new SeriesItem();
 
         /// <summary>
-        /// X축 데이터의 Attribute 이름 (Column_Info.attribute_name)
+        /// Y축 다중 시리즈 설정 (SeriesItem 리스트)
         /// </summary>
-        public string XAxisAttributeName { get; set; }
-
-        /// <summary>
-        /// Y축 데이터의 Object 이름 (Object_Info.object_name)
-        /// </summary>
-        public string YAxisObjectName { get; set; }
-
-        /// <summary>
-        /// Y축 데이터의 Attribute 이름 (Column_Info.attribute_name)
-        /// </summary>
-        public string YAxisAttributeName { get; set; }
+        public List<SeriesItem> YAxisSeries { get; set; } = new List<SeriesItem>();
 
         /// <summary>
         /// 데이터가 없을 때 재시도 횟수
@@ -48,16 +59,23 @@ namespace SimulationSpeedTimer
         /// </summary>
         public DatabaseQueryConfig Clone()
         {
-            return new DatabaseQueryConfig
+            var clone = new DatabaseQueryConfig
             {
                 DatabasePath = this.DatabasePath,
-                XAxisObjectName = this.XAxisObjectName,
-                XAxisAttributeName = this.XAxisAttributeName,
-                YAxisObjectName = this.YAxisObjectName,
-                YAxisAttributeName = this.YAxisAttributeName,
+                XAxisSeries = this.XAxisSeries?.Clone(),
                 RetryCount = this.RetryCount,
                 RetryIntervalMs = this.RetryIntervalMs
             };
+
+            if (this.YAxisSeries != null)
+            {
+                foreach (var s in this.YAxisSeries)
+                {
+                    clone.YAxisSeries.Add(s.Clone());
+                }
+            }
+
+            return clone;
         }
     }
 }
