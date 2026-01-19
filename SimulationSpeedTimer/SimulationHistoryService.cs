@@ -49,6 +49,78 @@ namespace SimulationSpeedTimer
             return frames;
         }
 
+        /// <summary>
+        /// 각 테이블별로 마지막 기록된 시점(Last Time)의 데이터(SimulationTable)를 조회하여 리스트로 반환합니다.
+        /// 사후 분석 시 테이블마다 종료 시점이 다른 경우(예: A는 12초, B는 14초) 각각의 마지막 상태를 확인하기 위함입니다.
+        /// 반환된 SimulationTable에는 's_time' 컬럼이 포함됩니다.
+        /// </summary>
+        /// <param name="dbPath">SQLite DB 파일 경로</param>
+        /// <returns>각 테이블의 마지막 프레임 데이터 리스트</returns>
+        public List<SimulationTable> LoadLastValues(string dbPath)
+        {
+            var results = new List<SimulationTable>();
+            string connectionString = $"Data Source={dbPath};Version=3;ReadOnly=True;";
+
+            using (var conn = new SQLiteConnection(connectionString))
+            {
+                conn.Open();
+
+                var schema = LoadSchema(conn);
+                if (schema == null || !schema.Tables.Any())
+                {
+                    return results;
+                }
+
+                foreach (var tableInfo in schema.Tables)
+                {
+                    try
+                    {
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            // 마지막 시간의 Row 1개 조회
+                            cmd.CommandText = $"SELECT * FROM {tableInfo.TableName} ORDER BY s_time DESC LIMIT 1";
+
+                            using (var reader = cmd.ExecuteReader())
+                            {
+                                if (reader.Read())
+                                {
+                                    // 논리 이름 사용
+                                    string resolvedTableName = tableInfo.ObjectName;
+                                    var tableData = new SimulationTable(resolvedTableName);
+
+                                    for (int i = 0; i < reader.FieldCount; i++)
+                                    {
+                                        string phyColName = reader.GetName(i);
+
+                                        // s_time은 LoadFullHistory에서는 제외하지만, 
+                                        // 여기서는 "테이블별 마지막 시간" 확인이 주 목적이므로 포함합니다.
+                                        
+                                        string attrName = phyColName;
+                                        if (tableInfo.ColumnsByPhysicalName.TryGetValue(phyColName, out var colInfo))
+                                        {
+                                            attrName = colInfo.AttributeName;
+                                        }
+
+                                        var val = reader.GetValue(i);
+                                        if (val != DBNull.Value)
+                                        {
+                                            tableData.AddColumn(attrName, val);
+                                        }
+                                    }
+                                    results.Add(tableData);
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[SimulationHistoryService] Last Value Load Error ({tableInfo.TableName}): {ex.Message}");
+                    }
+                }
+            }
+            return results;
+        }
+
         private void MergeTableData(SQLiteConnection conn, SchemaTableInfo tableInfo, double start, double end, Dictionary<double, SimulationFrame> frames)
         {
             try
