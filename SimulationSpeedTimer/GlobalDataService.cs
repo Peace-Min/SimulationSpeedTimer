@@ -219,7 +219,7 @@ namespace SimulationSpeedTimer
                         Console.WriteLine($"[{Id}] WaitForSchemaReady returned null (Timeout/Canceled?).");
                         return;
                     }
-                    Console.WriteLine($"[{Id}] Schema Ready. Tables: {_schema.Tables.Count}. Processing loop start.");
+                    Console.WriteLine($"[{Id}] Schema Ready. Tables: {_schema.Tables.Count()}. Processing loop start.");
 
                     // 3. 데이터 소비 루프
                     double nextCheckpoint = _config.QueryInterval;

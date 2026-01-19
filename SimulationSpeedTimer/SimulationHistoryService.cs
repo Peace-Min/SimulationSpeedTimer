@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Linq;
+using SimulationSpeedTimer.Models.Spatial;
 
 namespace SimulationSpeedTimer
 {
@@ -242,6 +243,218 @@ namespace SimulationSpeedTimer
                 Console.WriteLine($"[SimulationHistoryService] Schema Load Error: {ex.Message}");
                 return null;
             }
+        }
+        // --- Spatial DB Support Methods ---
+
+        /// <summary>
+        /// Spatial DB(spatial.db) 파일에서 데이터를 로드하여 DTO 모델 컨테이너로 반환합니다.
+        /// </summary>
+        public SpatialSimulationModel LoadSpatialData(string dbPath)
+        {
+            var model = new SpatialSimulationModel();
+            string connectionString = $"Data Source={dbPath};Version=3;ReadOnly=True;";
+
+            try
+            {
+                using (var conn = new SQLiteConnection(connectionString))
+                {
+                    conn.Open();
+
+                    // 각 테이블 별 로드 (데이터가 없을 수도 있으므로 try-catch 또는 로직 처리)
+                    // 1. Spatial_Object
+                    model.SpatialObjects = ReadTableList(conn, "Spatial_Object", ReadSpatialObjectRow);
+
+                    // 2. Spatial_Time_Info
+                    model.TimeInfos = ReadTableList(conn, "Spatial_Time_Info", ReadSpatialTimeInfoRow);
+
+                    // 3. Spatial_Reference_Position
+                    model.ReferencePositions = ReadTableList(conn, "Spatial_Reference_Position", ReadReferencePositionRow);
+
+                    // 4. Spatial_Parent
+                    model.SpatialParents = ReadTableList(conn, "Spatial_Parent", ReadSpatialParentRow);
+
+                    // 5. Spatial_Data
+                    model.SpatialData = ReadTableList(conn, "Spatial_Data", ReadSpatialDataRow);
+
+                    // 6. Spatial_Visual_Data
+                    model.SpatialVisualData = ReadTableList(conn, "Spatial_Visual_Data", ReadSpatialVisualDataRow);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SimulationHistoryService] Spatial Data Load Error: {ex.Message}");
+            }
+
+            return model;
+        }
+
+        private List<T> ReadTableList<T>(SQLiteConnection conn, string tableName, Func<SQLiteDataReader, T> mapper)
+        {
+            var list = new List<T>();
+            try
+            {
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = $"SELECT * FROM {tableName}";
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            try
+                            {
+                                list.Add(mapper(reader));
+                            }
+                            catch
+                            {
+                                // 개별 행 매핑 실패는 무시하거나 로깅
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SimulationHistoryService] Table '{tableName}' Read Error: {ex.Message}");
+            }
+            return list;
+        }
+
+        // --- Mappers ---
+
+        private SpatialObject ReadSpatialObjectRow(SQLiteDataReader reader)
+        {
+            return new SpatialObject
+            {
+                SpatialObjectName = GetString(reader, "spatial_object_name"),
+                EntityType = GetInt(reader, "entity_type"),
+                IFF = GetInt(reader, "IFF"),
+                RCS = GetDouble(reader, "RCS")
+            };
+        }
+
+        private SpatialTimeInfo ReadSpatialTimeInfoRow(SQLiteDataReader reader)
+        {
+            return new SpatialTimeInfo
+            {
+                CurrentTime = GetDouble(reader, "current_time"),
+                RandomSeed = GetString(reader, "random_seed"),
+                SimulationFinish = GetBool(reader, "simulation_finish")
+            };
+        }
+
+        private SpatialReferencePosition ReadReferencePositionRow(SQLiteDataReader reader)
+        {
+            return new SpatialReferencePosition
+            {
+                LatPos = GetDouble(reader, "Lat_Pos"),
+                LonPos = GetDouble(reader, "Lon_Pos")
+            };
+        }
+
+        private SpatialParent ReadSpatialParentRow(SQLiteDataReader reader)
+        {
+            return new SpatialParent
+            {
+                SpatialObjectName = GetString(reader, "spatial_object_name"),
+                STime = GetDouble(reader, "s_time"),
+                ParentSpatialObjectName = GetString(reader, "p_spatial_object_name")
+            };
+        }
+
+        private SpatialData ReadSpatialDataRow(SQLiteDataReader reader)
+        {
+            var item = new SpatialData();
+            MapSpatialBase(reader, item);
+            item.PlayerName = GetString(reader, "player_name");
+            return item;
+        }
+
+        private SpatialVisualData ReadSpatialVisualDataRow(SQLiteDataReader reader)
+        {
+            var item = new SpatialVisualData();
+            MapSpatialBase(reader, item);
+            return item;
+        }
+
+        private void MapSpatialBase(SQLiteDataReader reader, SpatialDataBase item)
+        {
+            item.SpatialObjectName = GetString(reader, "spatial_object_name");
+            item.STime = GetDouble(reader, "s_time");
+            item.DamageState = GetInt(reader, "Damage_State");
+            item.PlayerState = GetInt(reader, "Player_State");
+            
+            item.LatPos = GetDouble(reader, "Lat_Pos");
+            item.LonPos = GetDouble(reader, "Lon_Pos");
+            item.AltPos = GetDouble(reader, "Alt_Pos");
+            
+            item.Yaw = GetDouble(reader, "Yaw");
+            item.Pitch = GetDouble(reader, "Pitch");
+            item.Roll = GetDouble(reader, "Roll");
+            
+            item.LatVel = GetDouble(reader, "Lat_Vel");
+            item.LonVel = GetDouble(reader, "Lon_Vel");
+            item.AltVel = GetDouble(reader, "Alt_Vel");
+            
+            item.YawVel = GetDouble(reader, "Yaw_Vel");
+            item.PitchVel = GetDouble(reader, "Pitch_Vel");
+            item.RollVel = GetDouble(reader, "Roll_Vel");
+            
+            item.LatAcc = GetDouble(reader, "Lat_Acc");
+            item.LonAcc = GetDouble(reader, "Lon_Acc");
+            item.AltAcc = GetDouble(reader, "Alt_Acc");
+            
+            item.YawAcc = GetDouble(reader, "Yaw_Acc");
+            item.PitchAcc = GetDouble(reader, "Pitch_Acc");
+            item.RollAcc = GetDouble(reader, "Roll_Acc");
+
+            // Extended Attributes
+            item.ExtAttribute_0 = GetDouble(reader, "ExtAttribute_0");
+            item.ExtAttribute_1 = GetDouble(reader, "ExtAttribute_1");
+            item.ExtAttribute_2 = GetDouble(reader, "ExtAttribute_2");
+            item.ExtAttribute_3 = GetDouble(reader, "ExtAttribute_3");
+            item.ExtAttribute_4 = GetDouble(reader, "ExtAttribute_4");
+            item.ExtAttribute_5 = GetDouble(reader, "ExtAttribute_5");
+            item.ExtAttribute_6 = GetDouble(reader, "ExtAttribute_6");
+            item.ExtAttribute_7 = GetDouble(reader, "ExtAttribute_7");
+            item.ExtAttribute_8 = GetDouble(reader, "ExtAttribute_8");
+            item.ExtAttribute_9 = GetDouble(reader, "ExtAttribute_9");
+            item.ExtAttribute_10 = GetDouble(reader, "ExtAttribute_10");
+            item.ExtAttribute_11 = GetDouble(reader, "ExtAttribute_11");
+            item.ExtAttribute_12 = GetDouble(reader, "ExtAttribute_12");
+            item.ExtAttribute_13 = GetDouble(reader, "ExtAttribute_13");
+            item.ExtAttribute_14 = GetDouble(reader, "ExtAttribute_14");
+            item.ExtAttribute_15 = GetDouble(reader, "ExtAttribute_15");
+            item.ExtAttribute_16 = GetDouble(reader, "ExtAttribute_16");
+            item.ExtAttribute_17 = GetDouble(reader, "ExtAttribute_17");
+            item.ExtAttribute_18 = GetDouble(reader, "ExtAttribute_18");
+            item.ExtAttribute_19 = GetDouble(reader, "ExtAttribute_19");
+        }
+
+        // --- Helper Methods ---
+        private string GetString(SQLiteDataReader reader, string colName)
+        {
+            var val = reader[colName];
+            return val != DBNull.Value ? val.ToString() : null;
+        }
+
+        private int GetInt(SQLiteDataReader reader, string colName)
+        {
+            var val = reader[colName];
+            return val != DBNull.Value ? Convert.ToInt32(val) : 0;
+        }
+
+        private double GetDouble(SQLiteDataReader reader, string colName)
+        {
+            var val = reader[colName];
+            return val != DBNull.Value ? Convert.ToDouble(val) : 0.0;
+        }
+
+        private bool GetBool(SQLiteDataReader reader, string colName)
+        {
+            var val = reader[colName];
+            if (val == DBNull.Value) return false;
+            // SQLite boolean is often 0 or 1
+            return val.ToString() == "1" || val.ToString().ToLower() == "true";
         }
     }
 }
