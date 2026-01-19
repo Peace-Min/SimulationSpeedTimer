@@ -58,6 +58,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="ChartAxisDataProvider.cs" />
     <Compile Include="DatabaseQueryConfig.cs" />
     <Compile Include="SimulationContext.cs" />
     <Compile Include="ResolvedQueryInfo.cs" />
