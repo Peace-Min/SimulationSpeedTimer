@@ -11,7 +11,11 @@ namespace SimulationSpeedTimer
             // [New Architecture] Validator 실행 (필수 격리 테스트)
             // SimulationSpeedTimer.Tests.ArchitectureValidator.Run();
             // [Test Switch]
-            Tests.ShutdownSyncTest.Run();
+            // [Validation] Independent Polling & Merging Test
+            // Tests.IndependentPollingVerification.Run();
+            new SimulationSpeedTimer.Tests.IndependentPollingTest().Run();
+
+            // Tests.ShutdownSyncTest.Run();
             // Tests.StabilityCheck.Run();
         }
     }

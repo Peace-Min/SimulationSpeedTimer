@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace SimulationSpeedTimer
 {
-    public class ChartAxisDataProvider 
+    public class ChartAxisDataProvider
     {
         // Singleton Instance
         private static ChartAxisDataProvider _instance;
@@ -15,7 +15,7 @@ namespace SimulationSpeedTimer
 
         // UI 갱신 델리게이트 (외부에서 설정)
         // Time, X-Value, Y-Values (Key: SeriesName)
-        public Action<double, double, Dictionary<string, double>> OnDataUpdated; 
+        public Action<double, double, Dictionary<string, double>> OnDataUpdated;
 
         private ChartAxisDataProvider()
         {
@@ -75,44 +75,52 @@ namespace SimulationSpeedTimer
                 // X축 SeriesItem 사용
                 double? xVal = GetValue(frame, config.XAxisSeries.ObjectName, config.XAxisSeries.AttributeName);
 
-                if (!xVal.HasValue) continue; // X값이 없으면 해당 시점은 Skip
+                // [Global Time Fallback]
+                // 특정 테이블(A) 데이터가 없더라도, 현재 프레임의 시간(frame.Time)을 사용하여 
+                // 차트의 X축(시간)을 흐르게 만듭니다. (사용자 요청사항: "전체 시뮬레이션 시간 기준")
+                if (!xVal.HasValue)
+                {
+                    bool isXAxisTime = config.XAxisSeries.AttributeName.Equals("s_time", StringComparison.OrdinalIgnoreCase)
+                                       || config.XAxisSeries.AttributeName.Equals("Time", StringComparison.OrdinalIgnoreCase);
+
+                    if (isXAxisTime)
+                    {
+                        xVal = frame.Time;
+                    }
+                }
+
+                if (!xVal.HasValue) continue; // 여전히 X값이 없으면 Skip
 
                 // 2. Y축 다중 시리즈 조회
                 var yValues = new Dictionary<string, double>();
-                
+
                 // X축이 시간(s_time)을 나타내는지 확인 (DB 스키마 상 보통 s_time이 시간 컬럼)
                 // 혹은 사용자가 config에 's_time'이라고 명시했을 경우를 상정
-                bool isXAxisTime = config.XAxisSeries.AttributeName.Equals("s_time", StringComparison.OrdinalIgnoreCase) 
-                                   || config.XAxisSeries.AttributeName.Equals("Time", StringComparison.OrdinalIgnoreCase);
+                // bool isXAxisTime = config.XAxisSeries.AttributeName.Equals("s_time", StringComparison.OrdinalIgnoreCase)
+                //                    || config.XAxisSeries.AttributeName.Equals("Time", StringComparison.OrdinalIgnoreCase);
 
-                foreach(var series in config.YAxisSeries)
+                foreach (var series in config.YAxisSeries)
                 {
                     // 키 생성: SeriesName이 있으면 사용하고, 없으면 Obj.Attr 형식으로 생성
-                    string key = !string.IsNullOrEmpty(series.SeriesName) 
-                        ? series.SeriesName 
+                    string key = !string.IsNullOrEmpty(series.SeriesName)
+                        ? series.SeriesName
                         : $"{series.ObjectName}.{series.AttributeName}";
 
                     double? yVal = GetValue(frame, series.ObjectName, series.AttributeName);
-                    
+
                     if (yVal.HasValue)
                     {
                         yValues[key] = yVal.Value;
                     }
-                    else if (isXAxisTime)
-                    {
-                        // [요청사항 반영]
-                        // 데이터가 없는데(else), X축이 시간축(s_time)이라면 
-                        // 연속성을 위해 NaN으로라도 채워서 보냅니다.
-                        yValues[key] = double.NaN;
-                    }
+                    // [수정] Independent Polling에서는 데이터가 늦게 도착할 수 있으므로,
+                    // '지금 없다고 해서(else)' 함부로 NaN을 채우면 안 됩니다.
+                    // 나중에 도착했을 때 중복 포인트나 역행 현상이 발생할 수 있습니다.
+                    // 따라서 데이터가 없으면 그냥 해당 Series는 업데이트하지 않습니다.
                 }
 
                 // Inner Join Logic Variant:
-                // X축은 필수이고, Y축 데이터가 *하나라도* 존재(NaN 포함)하면 업데이트를 발생시킵니다.
-                if (yValues.Count > 0)
-                {
-                    OnDataUpdated?.Invoke(frame.Time, xVal.Value, yValues);
-                }
+                // X축이 존재한다면, Y값이 없더라도 이벤트를 발생시켜 X축 스크롤(시간 흐름)을 반영합니다.
+                OnDataUpdated?.Invoke(frame.Time, xVal.Value, yValues);
             }
         }
 

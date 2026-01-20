@@ -78,8 +78,17 @@ namespace SimulationSpeedTimer
 
                 foreach (var kvp in chunk)
                 {
-                    _frames[kvp.Key] = kvp.Value;
-                    _timeIndex.Add(kvp.Key);
+                    if (_frames.TryGetValue(kvp.Key, out var existingFrame))
+                    {
+                        // 기존 프레임이 있으면 병합 (테이블 데이터 추가/갱신)
+                        existingFrame.Merge(kvp.Value);
+                    }
+                    else
+                    {
+                        // 없으면 신규 등록
+                        _frames[kvp.Key] = kvp.Value;
+                        _timeIndex.Add(kvp.Key);
+                    }
                 }
 
                 // 슬라이딩 윈도우 적용 (오래된 데이터 제거)
@@ -116,6 +125,24 @@ namespace SimulationSpeedTimer
             try
             {
                 var times = _timeIndex.Where(t => t >= start && t <= end);
+                return times.Select(t => _frames[t]).ToList();
+            }
+            finally
+            {
+                _lock.ExitReadLock();
+            }
+        }
+
+        /// <summary>
+        /// 최근 N개의 프레임을 조회합니다 (테스트 및 디버깅용)
+        /// </summary>
+        public List<SimulationFrame> GetLatestFrames(int count)
+        {
+            _lock.EnterReadLock();
+            try
+            {
+                // 최신순으로 가져와서 다시 시간순(오름차순)으로 정렬
+                var times = _timeIndex.Reverse().Take(count).OrderBy(t => t);
                 return times.Select(t => _frames[t]).ToList();
             }
             finally

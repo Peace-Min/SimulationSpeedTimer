@@ -56,6 +56,19 @@ namespace SimulationSpeedTimer
         /// </summary>
         public IEnumerable<SimulationTable> AllTables => _tables.Values;
 
+        /// <summary>
+        /// 다른 프레임의 데이터를 현재 프레임에 병합합니다.
+        /// (동일 테이블이 있을 경우 덮어씁니다)
+        /// </summary>
+        public void Merge(SimulationFrame other)
+        {
+            if (other == null) return;
+            foreach (var table in other.AllTables)
+            {
+                AddOrUpdateTable(table);
+            }
+        }
+
         public bool IsEmpty => _tables.Count == 0;
     }
 
@@ -74,8 +87,8 @@ namespace SimulationSpeedTimer
         {
             TableName = tableName;
             // 대소문자 구분 없이 접근 가능하도록 설정
-            _columns = data != null 
-                ? new Dictionary<string, object>(data, StringComparer.OrdinalIgnoreCase) 
+            _columns = data != null
+                ? new Dictionary<string, object>(data, StringComparer.OrdinalIgnoreCase)
                 : new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
         }
 
@@ -123,9 +136,9 @@ namespace SimulationSpeedTimer
         }
 
         public bool ContainsColumn(string columnName) => _columns.ContainsKey(columnName);
-        
+
         public int ColumnCount => _columns.Count;
-        
+
         public IEnumerable<string> ColumnNames => _columns.Keys;
     }
 }

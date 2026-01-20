@@ -10,8 +10,8 @@ namespace SimulationSpeedTimer
     {
         static void Main(string[] args)
         {
-            // [New Architecture] Validator 실행 (필수 격리 테스트)
-            SimulationSpeedTimer.Tests.ArchitectureValidator.Run();
+            // [New Architecture] Independent Polling Test 실행
+            new SimulationSpeedTimer.Tests.IndependentPollingTest().Run();
         }
 
         static void TestBasicStartStop()
