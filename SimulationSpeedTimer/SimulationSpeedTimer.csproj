@@ -61,8 +61,10 @@
   <ItemGroup>
     <Compile Include="ChartAxisDataProvider.cs" />
     <Compile Include="DatabaseQueryConfig.cs" />
+    <Compile Include="HistoryPlaybackViewModel.cs" />
     <Compile Include="SimulationContext.cs" />
     <Compile Include="ResolvedQueryInfo.cs" />
+    <Compile Include="SimulationHistoryService.cs" />
     <Compile Include="TableDataViewModel.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="SimulationTimer.cs" />
