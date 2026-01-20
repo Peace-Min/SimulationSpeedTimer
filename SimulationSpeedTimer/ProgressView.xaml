@@ -1,0 +1,15 @@
+﻿<Window x:Class="SimulationSpeedTimer.ProgressView"
+        Title="Loading Data..." Height="120" Width="400"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        WindowStartupLocation="CenterOwner">
+    <Border Background="#2D2D30" CornerRadius="10" BorderBrush="#007ACC" BorderThickness="2">
+        <StackPanel VerticalAlignment="Center" Margin="20">
+            <TextBlock Text="{Binding StatusMessage}" Foreground="White" Margin="0,0,0,10"/>
+            <ProgressBar Value="{Binding ProgressValue}" Height="15" 
+                         Minimum="0" Maximum="100" 
+                         Foreground="#007ACC" Background="#3E3E42" BorderThickness="0"/>
+            <TextBlock Text="{Binding ProgressValue, StringFormat={}{0:N0}%}" 
+                       Foreground="Gray" HorizontalAlignment="Right" FontSize="10"/>
+        </StackPanel>
+    </Border>
+</Window>

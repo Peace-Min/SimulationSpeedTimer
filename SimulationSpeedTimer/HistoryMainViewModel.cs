@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Input;
 
 namespace SimulationSpeedTimer
@@ -38,6 +39,7 @@ namespace SimulationSpeedTimer
         {
             if (string.IsNullOrEmpty(dbPath)) return;
 
+
             // 1. 기존 인스턴스 정리 (Dispose)
             if (CurrentPlaybackVM != null)
             {
@@ -48,14 +50,38 @@ namespace SimulationSpeedTimer
                 // GC.Collect(); 
             }
 
-            // 2. 새로운 인스턴스 생성 (One-Shot)
-            var newVM = new HistoryPlaybackViewModel(configs);
+            // 1. 프로그레스 창 생성 및 모달리스 표시
+            var progressVM = new ProgressViewModel { StatusMessage = "Connecting to Database..." };
+            var progressWindow = new ProgressView { DataContext = progressVM, Owner = Application.Current.MainWindow };
+
+            progressWindow.Show(); // 모달리스 호출 (메인 조작 가능)
+
+            try
+            {
+                // STEP 1: DB 로드 (CPU/IO)
+                progressVM.StatusMessage = "Reading SQLite Data...";
+                var rawData = await Task.Run(() => _dbService.ReadAll(dbPath));
+                progressVM.ProgressValue = 30;
+
+                // 2. 새로운 인스턴스 생성 (One-Shot)
+                var newVM = new HistoryPlaybackViewModel(configs);
             
             // 3. UI 교체 (이제 View는 새로운 VM을 바라봄)
             CurrentPlaybackVM = newVM;
 
             // 4. 데이터 로딩 시작
             await newVM.LoadAsync(dbPath);
+                progressVM.StatusMessage = "Load Complete!";
+                await Task.Delay(500); // 완료 메시지를 잠시 보여줌
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error: {ex.Message}");
+            }
+            finally
+            {
+                progressWindow.Close(); // 작업 완료 후 닫기
+            }
         }
 
         public event PropertyChangedEventHandler PropertyChanged;
