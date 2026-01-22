@@ -14,8 +14,9 @@ namespace SimulationSpeedTimer
         private List<DatabaseQueryConfig> _configs = new List<DatabaseQueryConfig>();
 
         // UI 갱신 델리게이트 (외부에서 설정)
-        // Time, X-Value, Y-Values (Key: SeriesName)
-        public Action<double, double, Dictionary<string, double>> OnDataUpdated;
+        // Time, X-Value, Y-Value, Z-Value (Optional)
+        // 2D인 경우 Z는 null이 됩니다.
+        public Action<double, double, double, double?> OnDataUpdated;
 
         private ChartAxisDataProvider()
         {
@@ -49,8 +50,6 @@ namespace SimulationSpeedTimer
             // 필요한 경우 내부 자원 정리
         }
 
-        // OnTimeReceived 제거됨: 시간 공급은 외부에서 GlobalDataService.Instance.EnqueueTime()으로 직접 수행
-
         private void HandleNewFrames(List<SimulationFrame> frames, Guid sessionId)
         {
             // 1. 세션 ID 검증 (Lifecycle Isolation)
@@ -65,67 +64,56 @@ namespace SimulationSpeedTimer
 
         private void ProcessFrame(SimulationFrame frame)
         {
-            // SimulationFrame은 특정 시간 T에 대한 모든 테이블의 데이터 스냅샷입니다.
-            // GlobalDataService에서 이미 논리적 이름(ObjectName, AttributeName)으로 변환되어 저장되므로
-            // 별도의 메타데이터 매핑 없이 설정(Config)값 그대로 조회하면 됩니다.
-
             foreach (var config in _configs)
             {
-                // 1. X축 데이터 조회 (필수)
-                // X축 SeriesItem 사용
-                double? xVal = GetValue(frame, config.XAxisSeries.ObjectName, config.XAxisSeries.AttributeName);
-
-                // [Global Time Fallback]
-                // 특정 테이블(A) 데이터가 없더라도, 현재 프레임의 시간(frame.Time)을 사용하여 
-                // 차트의 X축(시간)을 흐르게 만듭니다. (사용자 요청사항: "전체 시뮬레이션 시간 기준")
-                if (!xVal.HasValue)
+                // 1. Fetching (Raw Data) - 있는 그대로 가져옴
+                double? xVal = null;
+                if (config.IsXAxisTime)
                 {
-                    bool isXAxisTime = config.XAxisSeries.AttributeName.Equals("s_time", StringComparison.OrdinalIgnoreCase)
-                                       || config.XAxisSeries.AttributeName.Equals("Time", StringComparison.OrdinalIgnoreCase);
-
-                    if (isXAxisTime)
-                    {
-                        xVal = frame.Time;
-                    }
+                    xVal = frame.Time;
+                }
+                else
+                {
+                    xVal = GetValue(frame, config.XColumn.ObjectName, config.XColumn.AttributeName);
                 }
 
-                if (!xVal.HasValue) continue; // 여전히 X값이 없으면 Skip
+                double? yVal = GetValue(frame, config.YColumn.ObjectName, config.YColumn.AttributeName);
 
-                // 2. Y축 다중 시리즈 조회
-                var yValues = new Dictionary<string, double>();
-
-                // X축이 시간(s_time)을 나타내는지 확인 (DB 스키마 상 보통 s_time이 시간 컬럼)
-                // 혹은 사용자가 config에 's_time'이라고 명시했을 경우를 상정
-                // bool isXAxisTime = config.XAxisSeries.AttributeName.Equals("s_time", StringComparison.OrdinalIgnoreCase)
-                //                    || config.XAxisSeries.AttributeName.Equals("Time", StringComparison.OrdinalIgnoreCase);
-
-                foreach (var series in config.YAxisSeries)
+                double? zVal = null;
+                if (config.Is3DMode)
                 {
-                    // 키 생성: SeriesName이 있으면 사용하고, 없으면 Obj.Attr 형식으로 생성
-                    string key = !string.IsNullOrEmpty(series.SeriesName)
-                        ? series.SeriesName
-                        : $"{series.ObjectName}.{series.AttributeName}";
-
-                    double? yVal = GetValue(frame, series.ObjectName, series.AttributeName);
-
-                    if (yVal.HasValue)
-                    {
-                        yValues[key] = yVal.Value;
-                    }
-                    // [수정] Independent Polling에서는 데이터가 늦게 도착할 수 있으므로,
-                    // '지금 없다고 해서(else)' 함부로 NaN을 채우면 안 됩니다.
-                    // 나중에 도착했을 때 중복 포인트나 역행 현상이 발생할 수 있습니다.
-                    // 따라서 데이터가 없으면 그냥 해당 Series는 업데이트하지 않습니다.
+                    zVal = GetValue(frame, config.ZColumn.ObjectName, config.ZColumn.AttributeName);
                 }
 
-                // Inner Join Logic Variant:
-                // X축이 존재한다면, Y값이 없더라도 이벤트를 발생시켜 X축 스크롤(시간 흐름)을 반영합니다.
-                OnDataUpdated?.Invoke(frame.Time, xVal.Value, yValues);
+                // 2. Policy Application (Business Logic) - 여기서 결정함
+                if (config.IsXAxisTime)
+                {
+                    // 정책: 시간축이면 관대하게 처리 (데이터 없으면 NaN으로라도 진행)
+                    if (!yVal.HasValue) yVal = double.NaN;
+
+                    // 3D 모드이면서 Z값이 없는 경우에도 NaN 처리
+                    if (config.Is3DMode && !zVal.HasValue) zVal = double.NaN;
+                }
+                else
+                {
+                    // 정책: 데이터축이면 엄격하게 처리 (데이터 없으면 스킵)
+                    if (!xVal.HasValue) continue;
+                    if (!yVal.HasValue) continue;
+                    if (config.Is3DMode && !zVal.HasValue) continue;
+                }
+
+                // X값이 여전히 없다면 스킵 (xVal은 위에서 Fallback 처리되지 않으므로 필수)
+                if (!xVal.HasValue) continue;
+
+                // 3. Dispatch
+                OnDataUpdated?.Invoke(frame.Time, xVal.Value, yVal.Value, zVal);
             }
         }
 
         private double? GetValue(SimulationFrame frame, string tableName, string colName)
         {
+            if (string.IsNullOrEmpty(tableName) || string.IsNullOrEmpty(colName)) return null;
+
             var table = frame.GetTable(tableName);
             if (table != null)
             {
