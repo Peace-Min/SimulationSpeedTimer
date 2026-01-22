@@ -62,6 +62,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ChartAxisDataProvider.cs" />
+    <Compile Include="Class1.cs" />
     <Compile Include="DatabaseQueryConfig.cs" />
     <Compile Include="HistoryMainViewModel.cs" />
     <Compile Include="HistoryPlaybackViewModel.cs" />
