@@ -11,12 +11,14 @@ namespace SimulationSpeedTimer
         public static ChartAxisDataProvider Instance => _instance ?? (_instance = new ChartAxisDataProvider());
 
         private Guid _currentSessionId;
-        private List<DatabaseQueryConfig> _configs = new List<DatabaseQueryConfig>();
+        private Dictionary<string, List<DatabaseQueryConfig>> _receivers
+            = new Dictionary<string, List<DatabaseQueryConfig>>();
 
         // UI 갱신 델리게이트 (외부에서 설정)
-        // Time, X-Value, Y-Value, Z-Value (Optional)
-        // 2D인 경우 Z는 null이 됩니다.
-        public Action<double, double, double, double?> OnDataUpdated;
+        // Param 1: ReceiverId (식별자)
+        // Param 2: SeriesIndex (리스트 내 순서)
+        // Param 3~6: Time, X, Y, Z (2D인 경우 Z는 null)
+        public Action<string, int, double, double, double, double?> OnDataUpdated;
 
         private ChartAxisDataProvider()
         {
@@ -26,9 +28,39 @@ namespace SimulationSpeedTimer
             // Repository 구독은 OnSessionStarted에서 동적으로 수행
         }
 
-        public void AddConfig(DatabaseQueryConfig config)
+        /// <summary>
+        /// 특정 수신자(ReceiverId)에 대한 시리즈 설정 리스트를 통째로 등록합니다.
+        /// </summary>
+        public void RegisterReceiver(string receiverId, List<DatabaseQueryConfig> configs)
         {
-            _configs.Add(config);
+            if (string.IsNullOrEmpty(receiverId)) return;
+
+            lock (_receivers)
+            {
+                // 덮어쓰기 정책 (기존 키가 있으면 교체)
+                _receivers[receiverId] = configs ?? new List<DatabaseQueryConfig>();
+            }
+        }
+
+        public void RemoveReceiver(string receiverId)
+        {
+            if (string.IsNullOrEmpty(receiverId)) return;
+
+            lock (_receivers)
+            {
+                if (_receivers.ContainsKey(receiverId))
+                {
+                    _receivers.Remove(receiverId);
+                }
+            }
+        }
+
+        public void ClearAllReceivers()
+        {
+            lock (_receivers)
+            {
+                _receivers.Clear();
+            }
         }
 
         private void OnSessionStarted(Guid sessionId)
@@ -64,49 +96,67 @@ namespace SimulationSpeedTimer
 
         private void ProcessFrame(SimulationFrame frame)
         {
-            foreach (var config in _configs)
+            // 스레드 안전하게 순회하기 위해 잠금 또는 복사 사용
+            KeyValuePair<string, List<DatabaseQueryConfig>>[] currentReceivers;
+            lock (_receivers)
             {
-                // 1. Fetching (Raw Data) - 있는 그대로 가져옴
-                double? xVal = null;
-                if (config.IsXAxisTime)
-                {
-                    xVal = frame.Time;
-                }
-                else
-                {
-                    xVal = GetValue(frame, config.XColumn.ObjectName, config.XColumn.AttributeName);
-                }
+                currentReceivers = _receivers.ToArray();
+            }
 
-                double? yVal = GetValue(frame, config.YColumn.ObjectName, config.YColumn.AttributeName);
+            foreach (var receiver in currentReceivers)
+            {
+                string receiverId = receiver.Key;
+                var configs = receiver.Value;
 
-                double? zVal = null;
-                if (config.Is3DMode)
-                {
-                    zVal = GetValue(frame, config.ZColumn.ObjectName, config.ZColumn.AttributeName);
-                }
+                if (configs == null) continue;
 
-                // 2. Policy Application (Business Logic) - 여기서 결정함
-                if (config.IsXAxisTime)
+                for (int i = 0; i < configs.Count; i++)
                 {
-                    // 정책: 시간축이면 관대하게 처리 (데이터 없으면 NaN으로라도 진행)
-                    if (!yVal.HasValue) yVal = double.NaN;
+                    var config = configs[i];
 
-                    // 3D 모드이면서 Z값이 없는 경우에도 NaN 처리
-                    if (config.Is3DMode && !zVal.HasValue) zVal = double.NaN;
-                }
-                else
-                {
-                    // 정책: 데이터축이면 엄격하게 처리 (데이터 없으면 스킵)
+                    // 1. Fetching (Raw Data) - 있는 그대로 가져옴
+                    double? xVal = null;
+                    if (config.IsXAxisTime)
+                    {
+                        xVal = frame.Time;
+                    }
+                    else
+                    {
+                        xVal = GetValue(frame, config.XColumn.ObjectName, config.XColumn.AttributeName);
+                    }
+
+                    double? yVal = GetValue(frame, config.YColumn.ObjectName, config.YColumn.AttributeName);
+
+                    double? zVal = null;
+                    if (config.Is3DMode)
+                    {
+                        zVal = GetValue(frame, config.ZColumn.ObjectName, config.ZColumn.AttributeName);
+                    }
+
+                    // 2. Policy Application (Business Logic) - 여기서 결정함
+                    if (config.IsXAxisTime)
+                    {
+                        // 정책: 시간축이면 관대하게 처리 (데이터 없으면 NaN으로라도 진행)
+                        if (!yVal.HasValue) yVal = double.NaN;
+
+                        // 3D 모드이면서 Z값이 없는 경우에도 NaN 처리
+                        if (config.Is3DMode && !zVal.HasValue) zVal = double.NaN;
+                    }
+                    else
+                    {
+                        // 정책: 데이터축이면 엄격하게 처리 (데이터 없으면 스킵)
+                        if (!xVal.HasValue) continue;
+                        if (!yVal.HasValue) continue;
+                        if (config.Is3DMode && !zVal.HasValue) continue;
+                    }
+
+                    // X값이 여전히 없다면 스킵 (xVal은 위에서 Fallback 처리되지 않으므로 필수)
                     if (!xVal.HasValue) continue;
-                    if (!yVal.HasValue) continue;
-                    if (config.Is3DMode && !zVal.HasValue) continue;
+
+                    // 3. Dispatch
+                    // ReceiverId와 SeriesIndex(i)를 함께 전달
+                    OnDataUpdated?.Invoke(receiverId, i, frame.Time, xVal.Value, yVal.Value, zVal);
                 }
-
-                // X값이 여전히 없다면 스킵 (xVal은 위에서 Fallback 처리되지 않으므로 필수)
-                if (!xVal.HasValue) continue;
-
-                // 3. Dispatch
-                OnDataUpdated?.Invoke(frame.Time, xVal.Value, yVal.Value, zVal);
             }
         }
 
