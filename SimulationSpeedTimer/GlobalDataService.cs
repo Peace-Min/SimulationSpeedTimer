@@ -32,9 +32,8 @@ namespace SimulationSpeedTimer
         {
             public string DbPath { get; set; }
             public double QueryInterval { get; set; } = 1.0;
-            // [Refactored] Retry 관련 설정은 Independent Polling 방식에서 더 이상 사용되지 않지만, 
-            // 하위 호환성 및 향후 재사용을 위해 남겨둘 수 있습니다. (현재 로직에서는 무시됨)
-            public int RetryCount { get; set; } = 3;
+            // [Refactored] Retry 관련 설정 (사용하지 않음, 호환성 유지)
+            public int RetryCount { get; set; } = 0; 
             public int RetryIntervalMs { get; set; } = 10;
 
             public Dictionary<string, int> ExpectedColumnCounts { get; set; } = new Dictionary<string, int>();
@@ -188,7 +187,8 @@ namespace SimulationSpeedTimer
                             // Independent Polling에서는 start 인자가 불필요하므로 제거합니다.
                             double rangeEnd = nextCheckpoint;
 
-                            ProcessRange(connection, rangeEnd, token);
+                            // [Fix] 빈 프레임 강제 주입: 데이터가 없어도 시간축 갱신을 위해 nextCheckpoint 시점에 프레임 생성 유도
+                            ProcessRange(connection, rangeEnd, token, forceFrameTime: rangeEnd);
 
                             // [수정] 처리가 완료된 'rangeEnd'로 갱신
                             lastQueryEndTime = rangeEnd;
@@ -200,7 +200,8 @@ namespace SimulationSpeedTimer
                                 double safeEndTime = time + QueryMargin;
 
                                 // 점프할 구간의 데이터를 통째로 처리
-                                ProcessRange(connection, safeEndTime, token);
+                                // [Fix] Fast-Forward 시점(time)에 해당하는 프레임 강제 주입
+                                ProcessRange(connection, safeEndTime, token, forceFrameTime: time);
 
                                 lastQueryEndTime = safeEndTime;
 
@@ -271,11 +272,26 @@ namespace SimulationSpeedTimer
                 catch { }
             }
 
-            private void ProcessRange(SQLiteConnection conn, double end, CancellationToken token)
+            // [Fix] forceFrameTime 파라미터 추가
+            private void ProcessRange(SQLiteConnection conn, double end, CancellationToken token, double? forceFrameTime = null)
             {
                 // [Independent Polling]
                 // 각 테이블별로 읽을 수 있는 만큼만 독립적으로 읽어서 병합합니다.
                 var chunk = FetchIndependentTables(conn, end);
+
+                // [Fix] 강제 프레임 주입 (데이터가 하나도 없는 구간이라도 시간축 진행을 위해 필요)
+                if (forceFrameTime.HasValue)
+                {
+                    double targetTime = forceFrameTime.Value;
+                    // 부동소수점 오차 고려: 딕셔너리에 정확히 없으면 추가
+                    if (!chunk.TryGetValue(targetTime, out _))
+                    {
+                        // 데이터가 없는 경우, 빈 SimulationFrame을 생성하여 주입
+                        // ChartAxisDataProvider는 이를 받아 NaN으로 처리하여 시간축을 진행시킴
+                        chunk[targetTime] = new SimulationFrame(targetTime);
+                        // Console.WriteLine($"[GlobalDataService] Injected Dummy Frame at {targetTime:F1}");
+                    }
+                }
 
                 if (chunk != null && chunk.Count > 0)
                 {
