@@ -4,6 +4,11 @@ using System.Dynamic;
 using System.Linq;
 using System.ComponentModel;
 using System.Windows.Data;
+using System.Windows.Input;
+using System.IO;
+using System.Threading.Tasks;
+using SimulationSpeedTimer.Services;
+using System.Windows;
 
 namespace SimulationSpeedTimer
 {
@@ -63,6 +68,82 @@ namespace SimulationSpeedTimer
         public HistoryTableDataViewModel()
         {
             _historyService = new SimulationHistoryService();
+            InitializeCommands();
+        }
+
+        public ICommand ExportCurrentTableCommand { get; private set; }
+        public ICommand ExportAllTablesCommand { get; private set; }
+
+        private void InitializeCommands()
+        {
+            ExportCurrentTableCommand = new RelayCommand(async _ => await ExportCurrentTableAsync());
+            ExportAllTablesCommand = new RelayCommand(async _ => await ExportAllTablesAsync());
+        }
+
+        private async Task ExportCurrentTableAsync()
+        {
+            if (string.IsNullOrEmpty(SelectedTableName) || Items == null || Items.Count == 0)
+            {
+                MessageBox.Show("No data to export.", "Export", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var service = new CsvExportService();
+            // Default filename: [TableName]_[Timestamp].csv
+            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string fileName = $"{SelectedTableName}_{timestamp}.csv";
+            string folder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Exports");
+            string fullPath = Path.Combine(folder, fileName);
+
+            try
+            {
+                // Explicit headers from Columns config
+                var headers = Columns.Select(c => c.FieldName).ToList();
+
+                await service.ExportAsync(Items, fullPath, headers);
+                MessageBox.Show($"Exported to:\n{fullPath}", "Export Success", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Export failed: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async Task ExportAllTablesAsync()
+        {
+            if (_rowCache == null || _rowCache.Count == 0)
+            {
+                MessageBox.Show("No data loaded.", "Export", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var service = new CsvExportService();
+            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string exportFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Exports", $"Session_{timestamp}");
+
+            int successCount = 0;
+            try
+            {
+                foreach (var tableName in _rowCache.Keys)
+                {
+                    var items = _rowCache[tableName];
+                    if (items == null || items.Count == 0) continue;
+
+                    if (!_columnCache.TryGetValue(tableName, out var colConfigs)) continue;
+
+                    var headers = colConfigs.Select(c => c.FieldName).ToList();
+                    string fileName = $"{tableName}.csv";
+                    string fullPath = Path.Combine(exportFolder, fileName);
+
+                    await service.ExportAsync(items, fullPath, headers);
+                    successCount++;
+                }
+                MessageBox.Show($"Successfully exported {successCount} tables to:\n{exportFolder}", "Export All Success", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Batch export failed: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         /// <summary>

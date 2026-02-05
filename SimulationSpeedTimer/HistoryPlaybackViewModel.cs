@@ -57,7 +57,7 @@ namespace SimulationSpeedTimer
         }
 
         // 내부 데이터 저장소
-        private readonly Dictionary<string, ObservableCollection<GridColumnItem>> _columnCache 
+        private readonly Dictionary<string, ObservableCollection<GridColumnItem>> _columnCache
             = new Dictionary<string, ObservableCollection<GridColumnItem>>();
 
         private readonly Dictionary<string, ObservableCollection<ExpandoObject>> _rowCache
@@ -70,7 +70,7 @@ namespace SimulationSpeedTimer
 
         // [UI 최적화] 백그라운드 로딩 및 스로틀링을 위한 구성요소
         // 튜플로 테이블 이름과 데이터를 함께 저장하여 라우팅 처리
-        private readonly ConcurrentQueue<(string TableName, ExpandoObject Row)> _pendingBuffer 
+        private readonly ConcurrentQueue<(string TableName, ExpandoObject Row)> _pendingBuffer
             = new ConcurrentQueue<(string TableName, ExpandoObject Row)>();
         private readonly DispatcherTimer _uiRefreshTimer;
         private CancellationTokenSource _loadCts;
@@ -80,14 +80,14 @@ namespace SimulationSpeedTimer
         public HistoryPlaybackViewModel(List<TableConfig> configs)
         {
             _configs = configs ?? new List<TableConfig>();
-            
+
             // UI 갱신 타이머 설정
             // 33ms Interval = 약 30fps 목표
             // Background 우선순위로 UI 반응성 확보
             _uiRefreshTimer = new DispatcherTimer(DispatcherPriority.Background);
-            _uiRefreshTimer.Interval = TimeSpan.FromMilliseconds(33); 
+            _uiRefreshTimer.Interval = TimeSpan.FromMilliseconds(33);
             _uiRefreshTimer.Tick += OnUIRefreshTimerTick;
-            
+
             InitializeStructure();
         }
 
@@ -140,9 +140,9 @@ namespace SimulationSpeedTimer
             // 2. 상태 초기화 (UI 스레드)
             // 인스턴스를 새로 만들면 불필요하지만, 만에 하나 재사용 시 안전장치
             foreach (var rows in _rowCache.Values) rows.Clear();
-            
+
             // 큐 비우기
-            lock(_pendingBuffer) { while (_pendingBuffer.TryDequeue(out _)); }
+            lock (_pendingBuffer) { while (_pendingBuffer.TryDequeue(out _)) ; }
 
             // Consumer 시작
             _isLoadingActive = true;
@@ -203,15 +203,27 @@ namespace SimulationSpeedTimer
             }
         }
 
+        private ExpandoObject CreateExpandoRow(double time, SimulationTable tableData)
+        {
+            var row = new ExpandoObject();
+            var dict = (IDictionary<string, object>)row;
+            dict["Time"] = time;
+            foreach (var colName in tableData.ColumnNames)
+            {
+                dict[colName] = tableData[colName];
+            }
+            return row;
+        }
+
         private void OnUIRefreshTimerTick(object sender, EventArgs e)
         {
             if (_pendingBuffer.IsEmpty) return;
 
             // 1. 테이블별 배치 데이터 바구니 (Dictionary로 그룹화)
             var batchData = new Dictionary<string, List<ExpandoObject>>();
-    
-            // [성능 튜닝] AddRange를 쓰므로 한 틱당 2,000~3,000개도 충분히 가볍습니다.
-            int maxProcessPerTick = 2500; 
+
+            // [성능 튜닝] 한 틱당 2,000~3,000개 처리
+            int maxProcessPerTick = 2500;
             int processed = 0;
 
             // 2. 큐에서 데이터 추출 및 그룹화
@@ -219,23 +231,25 @@ namespace SimulationSpeedTimer
             {
                 if (!batchData.ContainsKey(item.TableName))
                     batchData[item.TableName] = new List<ExpandoObject>();
-                
+
                 batchData[item.TableName].Add(item.Row);
                 processed++;
             }
 
-            // 3. [최적화 핵심] AddRange를 사용하여 테이블별로 '단 한 번의 UI 통지' 발생
+            // 3. 배치 추가 (ObservableCollection은 AddRange가 없으므로 foreach 사용)
             foreach (var kvp in batchData)
             {
                 if (_rowCache.TryGetValue(kvp.Key, out var targetCollection))
                 {
-                    // ObservableCollectionCore의 AddRange 활용
-                    targetCollection.AddRange(kvp.Value); 
+                    foreach (var row in kvp.Value)
+                    {
+                        targetCollection.Add(row);
+                    }
                 }
             }
 
             // 모든 처리가 완료되었고, 더 이상 들어올 데이터가 없다면 타이머 중지
-            if (_pendingBuffer.IsEmpty && !_isLoadingActive) 
+            if (_pendingBuffer.IsEmpty && !_isLoadingActive)
             {
                 _uiRefreshTimer.Stop();
             }

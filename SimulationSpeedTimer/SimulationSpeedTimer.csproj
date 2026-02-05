@@ -62,6 +62,12 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ChartAxisDataProvider.cs" />
+    <Compile Include="Models\Spatial\SpatialAuxModels.cs" />
+    <Compile Include="Models\Spatial\SpatialDataModels.cs" />
+    <Compile Include="Models\Spatial\SpatialSimulationModel.cs" />
+    <Compile Include="Models\UniversalCsvModel.cs" />
+    <Compile Include="Services\CsvExportService.cs" />
+    <Compile Include="RelayCommand.cs" />
     <Compile Include="Class1.cs" />
     <Compile Include="DatabaseQueryConfig.cs" />
     <Compile Include="HistoryMainViewModel.cs" />
@@ -88,6 +94,7 @@
     <Compile Include="Tests\StabilityCheck.cs" />
     <Compile Include="Tests\IndependentPollingVerification.cs" />
     <Compile Include="Tests\IndependentPollingTest.cs" />
+    <Compile Include="Tests\CsvExportTest.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

@@ -1,7 +1,15 @@
 ﻿<Window x:Class="SimulationSpeedTimer.ProgressView"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        mc:Ignorable="d"
         Title="Loading Data..." Height="120" Width="400"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
-        WindowStartupLocation="CenterOwner">
+        WindowStartupLocation="CenterOwner"
+        d:WindowStyle="SingleBorderWindow"
+        d:AllowsTransparency="False"
+        d:Background="White">
     <Border Background="#2D2D30" CornerRadius="10" BorderBrush="#007ACC" BorderThickness="2">
         <StackPanel VerticalAlignment="Center" Margin="20">
             <TextBlock Text="{Binding StatusMessage}" Foreground="White" Margin="0,0,0,10"/>
