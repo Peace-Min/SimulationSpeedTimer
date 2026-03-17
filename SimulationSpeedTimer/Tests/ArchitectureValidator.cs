@@ -45,11 +45,14 @@ namespace SimulationSpeedTimer.Tests
             {
                 // --- Session A setup ---
                 Console.WriteLine("1. Starting Session A...");
-                SimulationContext.Instance.Start();
+                var configA = new GlobalDataService.GlobalDataServiceConfig
+                {
+                    DbPath = dbPathA,
+                    QueryInterval = 0.1,
+                    RequiredSchema = BuildRequiredSchema("TestTable", "TestObj")
+                };
+                SimulationContext.Instance.StartAsync(configA).GetAwaiter().GetResult();
                 var sessionA_Id = SimulationContext.Instance.CurrentSessionId;
-                
-                var configA = new GlobalDataService.GlobalDataServiceConfig { DbPath = dbPathA, QueryInterval = 0.1 };
-                GlobalDataService.Instance.Start(configA);
 
                 // Inject Data A
                 Console.WriteLine("2. Injecting 10 frames to Session A...");
@@ -65,19 +68,21 @@ namespace SimulationSpeedTimer.Tests
 
                 // --- Scenario: Stop A and Immediately Start B ---
                 Console.WriteLine("3. Calling Stop() on Session A...");
-                GlobalDataService.Instance.Stop();
-                SimulationContext.Instance.Stop();
+                SimulationContext.Instance.StopAsync().GetAwaiter().GetResult();
 
                 Console.WriteLine("4. Starting Session B IMMEDIATELY...");
                 
                 // Start Session B
-                SimulationContext.Instance.Start(); // New ID generated, Repo cleared
+                var configB = new GlobalDataService.GlobalDataServiceConfig
+                {
+                    DbPath = dbPathB,
+                    QueryInterval = 0.1,
+                    RequiredSchema = BuildRequiredSchema("TestTable", "TestObj")
+                };
+                SimulationContext.Instance.StartAsync(configB).GetAwaiter().GetResult();
                 var sessionB_Id = SimulationContext.Instance.CurrentSessionId;
-                
+
                 if (sessionA_Id == sessionB_Id) throw new Exception("Session IDs must be different!");
-                
-                var configB = new GlobalDataService.GlobalDataServiceConfig { DbPath = dbPathB, QueryInterval = 0.1 };
-                GlobalDataService.Instance.Start(configB);
 
                 // Inject Data B (Use different time range to detect mixing)
                 // Session A는 0.0~0.9이고, Session B는 100.0~100.9를 사용.
@@ -130,8 +135,7 @@ namespace SimulationSpeedTimer.Tests
             }
             finally
             {
-                GlobalDataService.Instance.Stop();
-                SimulationContext.Instance.Stop();
+                SimulationContext.Instance.StopAsync().GetAwaiter().GetResult();
                 CleanupDb(dbPathA);
                 CleanupDb(dbPathB);
             }
@@ -144,9 +148,13 @@ namespace SimulationSpeedTimer.Tests
             
             try
             {
-                SimulationContext.Instance.Start();
-                var config = new GlobalDataService.GlobalDataServiceConfig { DbPath = dbPath, QueryInterval = 0.1 };
-                GlobalDataService.Instance.Start(config);
+                var config = new GlobalDataService.GlobalDataServiceConfig
+                {
+                    DbPath = dbPath,
+                    QueryInterval = 0.1,
+                    RequiredSchema = BuildRequiredSchema("TestTable", "TestObj")
+                };
+                SimulationContext.Instance.StartAsync(config).GetAwaiter().GetResult();
 
                 // 1. Data Injection
                 for (int i = 0; i < 50; i++) GlobalDataService.Instance.EnqueueTime(i * 0.1);
@@ -163,7 +171,7 @@ namespace SimulationSpeedTimer.Tests
 
                 // 3. Immediately Override with Stop()
                 Console.WriteLine("3. Calling Stop() IMMEDIATELY (Override)...");
-                GlobalDataService.Instance.Stop();
+                SimulationContext.Instance.StopAsync().GetAwaiter().GetResult();
 
                 // 4. Wait a bit to ensure worker finishes
                 Thread.Sleep(1000);
@@ -217,6 +225,13 @@ namespace SimulationSpeedTimer.Tests
                 }
             }
             return path;
+        }
+
+        private static SimulationSchema BuildRequiredSchema(string tableName, string objectName)
+        {
+            var schema = new SimulationSchema();
+            schema.AddTable(new SchemaTableInfo(tableName, objectName));
+            return schema;
         }
 
         private static void CleanupDb(string path)

@@ -101,10 +101,11 @@ namespace SimulationSpeedTimer
 
             // 이벤트 발생: 저장된 프레임들을 시간순으로 정렬하여 통보
             // (Lock 밖에서 안전하게 호출)
+            // Event payload should stay as batch-local delta, not mutate into a later merged snapshot.
             if (chunk.Count > 0)
             {
-                var sortedFrames = chunk.OrderBy(x => x.Key).Select(x => x.Value).ToList();
-                OnFramesAdded?.Invoke(sortedFrames, _currentSessionId);
+                var deltaFrames = chunk.OrderBy(x => x.Key).Select(x => x.Value.Clone()).ToList();
+                OnFramesAdded?.Invoke(deltaFrames, sessionId);
             }
         }
 
@@ -228,6 +229,38 @@ namespace SimulationSpeedTimer
                 _currentSessionId = sessionId; // 주입받은 ID 사용
 
                 // 스키마 정보도 초기화 (이전 세션의 스키마 잔재 제거)
+                Schema = null;
+            }
+            finally
+            {
+                _lock.ExitWriteLock();
+            }
+        }
+
+        public bool TrySetSchema(SimulationSchema schema, Guid sessionId)
+        {
+            _lock.EnterWriteLock();
+            try
+            {
+                if (_currentSessionId != sessionId)
+                {
+                    return false;
+                }
+
+                Schema = schema;
+                return true;
+            }
+            finally
+            {
+                _lock.ExitWriteLock();
+            }
+        }
+
+        public void ClearSessionSchema()
+        {
+            _lock.EnterWriteLock();
+            try
+            {
                 Schema = null;
             }
             finally

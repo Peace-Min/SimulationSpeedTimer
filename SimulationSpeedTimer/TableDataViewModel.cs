@@ -150,6 +150,12 @@ namespace SimulationSpeedTimer
 
         private void HandleSessionStopped()
         {
+            _currentSessionId = Guid.Empty;
+
+            foreach (var queue in _pendingBuffer.Values)
+            {
+                while (queue.TryDequeue(out _)) ;
+            }
             // [잔여 데이터 수신 허용]
             // Stop 버튼을 눌러도 GlobalDataService가 마지막 데이터를 보낼 수 있으므로
             // 여기서 이벤트 핸들러를 해제하지 않습니다. (_currentSessionId는 그대로 유지)

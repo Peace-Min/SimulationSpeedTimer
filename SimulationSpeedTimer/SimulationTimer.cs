@@ -178,9 +178,8 @@ namespace SimulationSpeedTimer
             {
                 // 종료됨
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Debug.WriteLine($"Error in TickLoop: {ex.Message}");
             }
         }
 

@@ -69,6 +69,17 @@ namespace SimulationSpeedTimer
             }
         }
 
+        public SimulationFrame Clone()
+        {
+            var clone = new SimulationFrame(Time);
+            foreach (var table in AllTables)
+            {
+                clone.AddOrUpdateTable(table.Clone());
+            }
+
+            return clone;
+        }
+
         public bool IsEmpty => _tables.Count == 0;
     }
 
@@ -140,5 +151,10 @@ namespace SimulationSpeedTimer
         public int ColumnCount => _columns.Count;
 
         public IEnumerable<string> ColumnNames => _columns.Keys;
+
+        public SimulationTable Clone()
+        {
+            return new SimulationTable(TableName, _columns);
+        }
     }
 }

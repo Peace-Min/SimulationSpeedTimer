@@ -1,18 +1,32 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace SimulationSpeedTimer
 {
+    public enum SimulationLifecycleState
+    {
+        Idle,
+        Starting,
+        Running,
+        Stopping
+    }
+
     /// <summary>
-    /// 시뮬레이션 전체의 생명주기(Lifecycle)와 세션 상태를 중앙 관리하는 컨텍스트
+    /// 시뮬레이션의 전체 생명주기와 세션 상태를 중앙에서 관리하는 컨텍스트
     /// </summary>
     public class SimulationContext
     {
         public static SimulationContext Instance { get; } = new SimulationContext();
 
+        private readonly SemaphoreSlim _lifecycleGate = new SemaphoreSlim(1, 1);
+
         /// <summary>
-        /// 현재 활성 세션 ID. 실행 중이 아닐 때는 Guid.Empty
+        /// 현재 활성 세션 ID. 실행 중이 아니면 Guid.Empty
         /// </summary>
         public Guid CurrentSessionId { get; private set; } = Guid.Empty;
+
+        public SimulationLifecycleState CurrentState { get; private set; } = SimulationLifecycleState.Idle;
 
         /// <summary>
         /// 시뮬레이션 시작 시 발생 (세션 ID 전달)
@@ -27,43 +41,86 @@ namespace SimulationSpeedTimer
         private SimulationContext() { }
 
         /// <summary>
-        /// 시뮬레이션 세션을 시작합니다.
-        /// GlobalDataService를 구동하고 참여자들에게 세션 ID를 전파합니다.
+        /// 새 세션을 시작하고 GlobalDataService까지 함께 구동합니다.
         /// </summary>
-        /// <summary>
-        /// 시뮬레이션 세션을 시작합니다.
-        /// (주의: 이 메서드 호출 후 GlobalDataService.Start()를 명시적으로 호출해야 데이터가 흐릅니다.)
-        /// </summary>
-        public void Start()
+        public async Task StartAsync(GlobalDataService.GlobalDataServiceConfig config, CancellationToken cancellationToken = default(CancellationToken))
         {
-            Console.WriteLine("[SimulationContext] Initializing Session...");
+            if (config == null) throw new ArgumentNullException(nameof(config));
 
-            // 1. Context가 주도적으로 ID 생성
-            var newSessionId = Guid.NewGuid();
-            CurrentSessionId = newSessionId;
+            await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await StopActiveSessionCoreAsync(notify: true, cancellationToken).ConfigureAwait(false);
 
-            // 2. Repository 초기화 (Passive)
-            SharedFrameRepository.Instance.StartNewSession(newSessionId);
-            
-            Console.WriteLine($"[SimulationContext] Session Started: {CurrentSessionId}");
+                CurrentState = SimulationLifecycleState.Starting;
 
-            // 3. 구독자(Controller, VM)들에게 알림
-            OnSessionStarted?.Invoke(CurrentSessionId);
+                var newSessionId = BeginNewSession();
+                await GlobalDataService.Instance.StartSessionAsync(newSessionId, config, cancellationToken).ConfigureAwait(false);
+
+                CurrentState = SimulationLifecycleState.Running;
+                OnSessionStarted?.Invoke(CurrentSessionId);
+            }
+            catch
+            {
+                if (CurrentState == SimulationLifecycleState.Starting)
+                {
+                    CurrentSessionId = Guid.Empty;
+                    CurrentState = SimulationLifecycleState.Idle;
+                }
+
+                throw;
+            }
+            finally
+            {
+                _lifecycleGate.Release();
+            }
         }
 
         /// <summary>
-        /// 시뮬레이션 세션을 종료합니다.
-        /// (주의: GlobalDataService.Stop()을 먼저 호출하는 것을 권장합니다.)
+        /// 레거시 호출부 호환용. 세션 ID와 repository만 갱신합니다.
         /// </summary>
-        public void Stop()
+        public async Task StopAsync(CancellationToken cancellationToken = default(CancellationToken))
         {
-            Console.WriteLine("[SimulationContext] Stopping Session...");
+            await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await StopActiveSessionCoreAsync(notify: true, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _lifecycleGate.Release();
+            }
+        }
 
-            // 1. 종료 알림 (UI 등 정리)
-            OnSessionStopped?.Invoke();
-            
+        private Guid BeginNewSession()
+        {
+            var newSessionId = Guid.NewGuid();
+            CurrentSessionId = newSessionId;
+            SharedFrameRepository.Instance.StartNewSession(newSessionId);
+            return newSessionId;
+        }
+
+        private async Task StopActiveSessionCoreAsync(bool notify, CancellationToken cancellationToken)
+        {
+            var hadActiveSession = CurrentSessionId != Guid.Empty || GlobalDataService.Instance.HasActiveSession;
+            if (!hadActiveSession)
+            {
+                CurrentState = SimulationLifecycleState.Idle;
+                return;
+            }
+
+            CurrentState = SimulationLifecycleState.Stopping;
+
+            await GlobalDataService.Instance.StopAsync(cancellationToken).ConfigureAwait(false);
+
             CurrentSessionId = Guid.Empty;
-            Console.WriteLine("[SimulationContext] Session Stopped.");
+            SharedFrameRepository.Instance.ClearSessionSchema();
+            CurrentState = SimulationLifecycleState.Idle;
+
+            if (notify)
+            {
+                OnSessionStopped?.Invoke();
+            }
         }
     }
 }

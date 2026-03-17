@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="System.Data.SQLite">
+      <HintPath>..\packages\Stub.System.Data.SQLite.Core.NetFramework.1.0.119.0\lib\net46\System.Data.SQLite.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Xaml" />
+    <Reference Include="WindowsBase" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\packages\Stub.System.Data.SQLite.Core.NetFramework.1.0.119.0\build\net46\x64\SQLite.Interop.dll">
+      <Link>x64\SQLite.Interop.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\packages\Stub.System.Data.SQLite.Core.NetFramework.1.0.119.0\build\net46\x86\SQLite.Interop.dll">
+      <Link>x86\SQLite.Interop.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\GlobalDataService.cs" Link="GlobalDataService.cs" />
+    <Compile Include="..\SharedFrameRepository.cs" Link="SharedFrameRepository.cs" />
+    <Compile Include="..\SimulationContext.cs" Link="SimulationContext.cs" />
+    <Compile Include="..\SimulationFrame.cs" Link="SimulationFrame.cs" />
+    <Compile Include="..\SimulationSchema.cs" Link="SimulationSchema.cs" />
+    <Compile Include="..\DatabaseQueryConfig.cs" Link="DatabaseQueryConfig.cs" />
+    <Compile Include="..\TableDataViewModel.cs" Link="TableDataViewModel.cs" />
+    <Compile Include="..\ChartAxisDataProvider.cs" Link="ChartAxisDataProvider.cs" />
+    <Compile Include="SessionIsolationValidationProgram.cs" />
+  </ItemGroup>
+</Project>

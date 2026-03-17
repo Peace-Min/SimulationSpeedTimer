@@ -25,16 +25,13 @@ namespace SimulationSpeedTimer.Tests
             Console.WriteLine("[Setup] Database & Schema Initialized.");
 
             // 2. Start GlobalDataService
-            // Context Start
-            SimulationContext.Instance.Start();
-
-            // Service Config
             var gdConfig = new GlobalDataService.GlobalDataServiceConfig
             {
                 DbPath = TestDbPath,
-                QueryInterval = 0.5 // High frequency for testing
+                QueryInterval = 0.5, // High frequency for testing
+                RequiredSchema = BuildRequiredSchema()
             };
-            GlobalDataService.Instance.Start(gdConfig);
+            SimulationContext.Instance.StartAsync(gdConfig).GetAwaiter().GetResult();
             Console.WriteLine("[Setup] GlobalDataService Started.\n");
 
             try
@@ -143,7 +140,7 @@ namespace SimulationSpeedTimer.Tests
 
                 Console.WriteLine(" > Stopping Service...");
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                GlobalDataService.Instance.Stop();
+                SimulationContext.Instance.StopAsync().GetAwaiter().GetResult();
                 sw.Stop();
 
                 Console.WriteLine($" > Service Stopped in {sw.ElapsedMilliseconds}ms.");
@@ -240,8 +237,7 @@ namespace SimulationSpeedTimer.Tests
         {
             try
             {
-                SimulationContext.Instance.Stop();
-                GlobalDataService.Instance.Stop();
+                SimulationContext.Instance.StopAsync().GetAwaiter().GetResult();
                 SQLiteConnection.ClearAllPools();
 
                 // if (File.Exists(TestDbPath)) File.Delete(TestDbPath);
@@ -250,6 +246,21 @@ namespace SimulationSpeedTimer.Tests
                 Environment.Exit(0);
             }
             catch { }
+        }
+
+        private static SimulationSchema BuildRequiredSchema()
+        {
+            var schema = new SimulationSchema();
+
+            var fastTable = new SchemaTableInfo(TableFast, "ObjFast");
+            fastTable.AddColumn(new SchemaColumnInfo("val", "Value", "DOUBLE"));
+            schema.AddTable(fastTable);
+
+            var slowTable = new SchemaTableInfo(TableSlow, "ObjSlow");
+            slowTable.AddColumn(new SchemaColumnInfo("val", "Value", "DOUBLE"));
+            schema.AddTable(slowTable);
+
+            return schema;
         }
     }
 }

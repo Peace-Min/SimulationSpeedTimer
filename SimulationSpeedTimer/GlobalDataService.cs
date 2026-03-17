@@ -19,9 +19,9 @@ namespace SimulationSpeedTimer
 
         // 현재 활성 세션 (없으면 null)
         private DataSession _currentSession;
+        private readonly SemaphoreSlim _sessionGate = new SemaphoreSlim(1, 1);
 
-        // [테스트용] 데이터 조회 결과 확인을 위한 Hook (Session에서 Bubbling)
-        internal event Action<Dictionary<double, SimulationFrame>> _onChunkProcessed;
+        internal bool HasActiveSession => _currentSession != null;
 
         private GlobalDataService() { }
 
@@ -32,39 +32,58 @@ namespace SimulationSpeedTimer
         {
             public string DbPath { get; set; }
             public double QueryInterval { get; set; } = 1.0;
-            // [Refactored] Retry 관련 설정 (사용하지 않음, 호환성 유지)
-            public int RetryCount { get; set; } = 0; 
-            public int RetryIntervalMs { get; set; } = 10;
-
-            public Dictionary<string, int> ExpectedColumnCounts { get; set; } = new Dictionary<string, int>();
+            public SimulationSchema RequiredSchema { get; set; }
         }
 
-        public void Start(GlobalDataServiceConfig config)
+        internal async Task StartSessionAsync(Guid sessionId, GlobalDataServiceConfig config, CancellationToken cancellationToken = default(CancellationToken))
         {
             if (config == null) throw new ArgumentNullException(nameof(config));
-
-            var oldSession = _currentSession;
-            _currentSession = null;
-            oldSession?.Stop();
-
-            var sessionId = SimulationContext.Instance.CurrentSessionId;
             if (sessionId == Guid.Empty)
             {
                 throw new InvalidOperationException("[GlobalDataService] Cannot start service: SimulationContext is not active.");
             }
+            if (config.RequiredSchema == null || config.RequiredSchema.Tables == null || !config.RequiredSchema.Tables.Any())
+            {
+                throw new InvalidOperationException("[GlobalDataService] RequiredSchema must be provided before starting a session.");
+            }
 
-            var newSession = new DataSession(sessionId, config);
-            newSession.OnChunkProcessed += (chunk) => _onChunkProcessed?.Invoke(chunk);
+            await _sessionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var oldSession = _currentSession;
+                _currentSession = null;
+                if (oldSession != null)
+                {
+                    await oldSession.StopAsync().ConfigureAwait(false);
+                }
 
-            _currentSession = newSession;
-            _currentSession.Run();
+                cancellationToken.ThrowIfCancellationRequested();
 
-            Console.WriteLine($"[GlobalDataService] New Session Started: {sessionId} (Path: {config.DbPath})");
+                _currentSession = new DataSession(sessionId, config);
+                _currentSession.Run();
+            }
+            finally
+            {
+                _sessionGate.Release();
+            }
         }
 
         public void EnqueueTime(double time)
         {
-            _currentSession?.Enqueue(time);
+            var session = _currentSession;
+            if (session == null) return;
+
+            if (SimulationContext.Instance.CurrentState != SimulationLifecycleState.Running)
+            {
+                return;
+            }
+
+            if (SimulationContext.Instance.CurrentSessionId != session.Id)
+            {
+                return;
+            }
+
+            session.Enqueue(time);
         }
 
         public void CompleteSession(Action onFlushCompleted = null)
@@ -72,17 +91,30 @@ namespace SimulationSpeedTimer
             _currentSession?.MarkComplete(onFlushCompleted);
         }
 
-        public void Stop()
+        internal async Task StopAsync(CancellationToken cancellationToken = default(CancellationToken))
         {
-            var session = _currentSession;
-            _currentSession = null;
-            session?.Stop();
-            Console.WriteLine("[GlobalDataService] Stop Requested (Session detached).");
+            await _sessionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var session = _currentSession;
+                _currentSession = null;
+
+                if (session == null)
+                {
+                    return;
+                }
+
+                await session.StopAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                _sessionGate.Release();
+            }
         }
 
         public void Dispose()
         {
-            Stop();
+            StopAsync().GetAwaiter().GetResult();
         }
 
         // =================================================================================================
@@ -95,7 +127,6 @@ namespace SimulationSpeedTimer
 
             private const double QueryMargin = 0.000001;
 
-            private Task _workerTask;
             private CancellationTokenSource _cts;
             private BlockingCollection<double> _timeBuffer;
             private SimulationSchema _schema;
@@ -106,8 +137,10 @@ namespace SimulationSpeedTimer
             private Dictionary<string, double> _tableCursors = new Dictionary<string, double>();
 
             private volatile Action _completionCallback;
+            private readonly TaskCompletionSource<bool> _completionSource =
+                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-            public event Action<Dictionary<double, SimulationFrame>> OnChunkProcessed;
+            public Task Completion => _completionSource.Task;
 
             public DataSession(Guid id, GlobalDataServiceConfig config)
             {
@@ -119,7 +152,7 @@ namespace SimulationSpeedTimer
 
             public void Run()
             {
-                _workerTask = Task.Run(() => WorkerLoop(_cts.Token));
+                Task.Run(() => WorkerLoop(_cts.Token));
             }
 
             public void Enqueue(double time)
@@ -151,30 +184,25 @@ namespace SimulationSpeedTimer
                 try { _cts?.Cancel(); } catch { }
             }
 
+            public async Task StopAsync()
+            {
+                Stop();
+                await Completion.ConfigureAwait(false);
+            }
+
             private void WorkerLoop(CancellationToken token)
             {
                 SQLiteConnection connection = null;
 
                 try
                 {
-                    Console.WriteLine($"[{Id}] WorkerLoop Started.");
-
                     connection = WaitForConnection(token);
                     if (connection == null) return;
-                    Console.WriteLine($"[{Id}] DB Connected: {_config.DbPath}");
-
-                    using (var cmd = connection.CreateCommand())
-                    {
-                        cmd.CommandText = "PRAGMA journal_mode=WAL;";
-                        cmd.ExecuteNonQuery();
-                    }
 
                     _schema = WaitForSchemaReady(connection, token);
                     if (_schema == null) return;
-                    Console.WriteLine($"[{Id}] Schema Ready. Tables: {_schema.Tables.Count()}. Processing loop start.");
 
-                    double nextCheckpoint = _config.QueryInterval;
-                    double lastQueryEndTime = 0.0;
+                    double nextCheckpoint = NormalizeCheckpointTime(_config.QueryInterval);
                     double lastSeenTime = 0.0;
 
                     foreach (var time in _timeBuffer.GetConsumingEnumerable())
@@ -183,15 +211,12 @@ namespace SimulationSpeedTimer
 
                         if (time >= nextCheckpoint)
                         {
-                            // [수정] 이전 처리 종료 시점(lastQueryEndTime)부터 처리를 시작해야 중복/누락이 없음
-                            // Independent Polling에서는 start 인자가 불필요하므로 제거합니다.
                             double rangeEnd = nextCheckpoint;
 
                             // [Fix] 빈 프레임 강제 주입: 데이터가 없어도 시간축 갱신을 위해 nextCheckpoint 시점에 프레임 생성 유도
                             ProcessRange(connection, rangeEnd, token, forceFrameTime: rangeEnd);
 
                             // [수정] 처리가 완료된 'rangeEnd'로 갱신
-                            lastQueryEndTime = rangeEnd;
 
                             // [루프 최적화: Fast-Forward]
                             double gap = time - nextCheckpoint;
@@ -203,14 +228,13 @@ namespace SimulationSpeedTimer
                                 // [Fix] Fast-Forward 시점(time)에 해당하는 프레임 강제 주입
                                 ProcessRange(connection, safeEndTime, token, forceFrameTime: time);
 
-                                lastQueryEndTime = safeEndTime;
 
                                 int jumps = (int)Math.Floor((time - nextCheckpoint) / _config.QueryInterval) + 1;
-                                nextCheckpoint = Math.Round(nextCheckpoint + jumps * _config.QueryInterval, 1);
+                                nextCheckpoint = NormalizeCheckpointTime(nextCheckpoint + jumps * _config.QueryInterval);
                             }
                             else
                             {
-                                nextCheckpoint = Math.Round(nextCheckpoint + _config.QueryInterval, 1);
+                                nextCheckpoint = NormalizeCheckpointTime(nextCheckpoint + _config.QueryInterval);
                             }
 
                             if (++_yieldCounter % 50 == 0) Thread.Sleep(10);
@@ -229,12 +253,10 @@ namespace SimulationSpeedTimer
                         // 종료 시점까지 남은 데이터를 모두 긁어옵니다. (CancellationToken은 무시하거나 None 사용)
                         // 사용자 보장: "Write는 다 끝났다" -> 따라서 Retry 없이 1회 조회로 족함.
                         ProcessRange(connection, finalEndTime, CancellationToken.None);
-                        Console.WriteLine($"[{Id}] Finalizing: Synced residual data up to {finalEndTime:F1}.");
                     }
                 }
                 catch (OperationCanceledException)
                 {
-                    Console.WriteLine($"[{Id}] WorkerLoop Canceled.");
                 }
                 catch (Exception ex)
                 {
@@ -242,34 +264,26 @@ namespace SimulationSpeedTimer
                 }
                 finally
                 {
-                    Console.WriteLine($"[{Id}] WorkerLoop Finally Enter. Cleaning up...");
-                    try { _completionCallback?.Invoke(); } catch { }
+                    var completionCallback = _completionCallback;
+                    _completionCallback = null;
 
-                    if (connection != null)
+                    try
                     {
-                        TryCheckpoint(connection);
-                        connection.Dispose();
+                        if (connection != null)
+                        {
+                            connection.Dispose();
+                        }
+
+                        _timeBuffer?.Dispose();
+                        _cts?.Dispose();
                     }
+                    finally
+                    {
+                        _completionSource.TrySetResult(true);
 
-                    SQLiteConnection.ClearAllPools();
-                    TryDeleteWalFiles();
-
-                    _timeBuffer?.Dispose();
-                    _cts?.Dispose();
-                    Console.WriteLine($"[{Id}] Session Disposed.");
+                        try { completionCallback?.Invoke(); } catch { }
+                    }
                 }
-            }
-
-            private void TryDeleteWalFiles()
-            {
-                try
-                {
-                    string walPath = _config.DbPath + "-wal";
-                    string shmPath = _config.DbPath + "-shm";
-                    if (System.IO.File.Exists(walPath)) System.IO.File.Delete(walPath);
-                    if (System.IO.File.Exists(shmPath)) System.IO.File.Delete(shmPath);
-                }
-                catch { }
             }
 
             // [Fix] forceFrameTime 파라미터 추가
@@ -289,14 +303,12 @@ namespace SimulationSpeedTimer
                         // 데이터가 없는 경우, 빈 SimulationFrame을 생성하여 주입
                         // ChartAxisDataProvider는 이를 받아 NaN으로 처리하여 시간축을 진행시킴
                         chunk[targetTime] = new SimulationFrame(targetTime);
-                        // Console.WriteLine($"[GlobalDataService] Injected Dummy Frame at {targetTime:F1}");
                     }
                 }
 
                 if (chunk != null && chunk.Count > 0)
                 {
                     SharedFrameRepository.Instance.StoreChunk(chunk, this.Id);
-                    OnChunkProcessed?.Invoke(chunk);
                 }
             }
 
@@ -316,16 +328,8 @@ namespace SimulationSpeedTimer
                         {
                             startCursor = cursor;
                         }
-                        Console.WriteLine($"[DEBUG] Fetching {tableInfo.TableName} Start: {startCursor,5:F1} Target: {targetEnd,5:F1}");
 
-                        // DEBUG: Check actual count
 
-                        using (var debugCmd = conn.CreateCommand())
-                        {
-                            debugCmd.CommandText = $"SELECT count(*) FROM {tableInfo.TableName}";
-                            object cnt = debugCmd.ExecuteScalar();
-                            Console.WriteLine($"[DEBUG] {tableInfo.TableName} Total Count: {cnt}");
-                        }
 
 
                         // 이미 목표 시간까지 읽었으면 Skip
@@ -334,7 +338,7 @@ namespace SimulationSpeedTimer
                         using (var cmd = conn.CreateCommand())
                         {
                             // 내 커서 이후 ~ 목표 시간까지 조회
-                            cmd.CommandText = $"SELECT * FROM {tableInfo.TableName} WHERE s_time > @start AND s_time <= @end";
+                            cmd.CommandText = BuildRangeQuery(tableInfo);
                             cmd.Parameters.AddWithValue("@start", startCursor);
                             cmd.Parameters.AddWithValue("@end", targetEnd);
 
@@ -386,16 +390,66 @@ namespace SimulationSpeedTimer
                             {
                                 _tableCursors[tableInfo.TableName] = maxTimeRead;
                             }
-                            // Console.WriteLine($"[DEBUG] {tableInfo.TableName} read up to {maxTimeRead}. Rows: {chunk.Count}");
                         }
                     }
-                    catch (Exception ex)
+                    catch
                     {
-                        Console.WriteLine($"[ERROR] FetchIndependentTables Failed for {tableInfo.TableName}: {ex.Message}");
                     }
                 }
 
                 return chunk;
+            }
+
+            private string BuildRangeQuery(SchemaTableInfo tableInfo)
+            {
+                var selectedColumns = new List<string> { QuoteIdentifier("s_time") };
+
+                foreach (var columnName in tableInfo.ColumnsByPhysicalName.Keys)
+                {
+                    if (string.Equals(columnName, "s_time", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    selectedColumns.Add(QuoteIdentifier(columnName));
+                }
+
+                var projection = string.Join(", ", selectedColumns.Distinct(StringComparer.OrdinalIgnoreCase));
+                return $"SELECT {projection} FROM {QuoteIdentifier(tableInfo.TableName)} WHERE {QuoteIdentifier("s_time")} > @start AND {QuoteIdentifier("s_time")} <= @end";
+            }
+
+            private static string QuoteIdentifier(string identifier)
+            {
+                if (string.IsNullOrWhiteSpace(identifier))
+                {
+                    throw new ArgumentException("Identifier cannot be null or empty.", nameof(identifier));
+                }
+
+                return "\"" + identifier.Replace("\"", "\"\"") + "\"";
+            }
+
+            private double NormalizeCheckpointTime(double value)
+            {
+                return Math.Round(value, GetIntervalPrecision(_config.QueryInterval));
+            }
+
+            private static int GetIntervalPrecision(double interval)
+            {
+                interval = Math.Abs(interval);
+                if (interval <= 0)
+                {
+                    return 6;
+                }
+
+                for (int precision = 0; precision <= 6; precision++)
+                {
+                    if (Math.Abs(interval - Math.Round(interval, precision)) < 0.000000001)
+                    {
+                        return precision;
+                    }
+                }
+
+                return 6;
             }
 
             private SQLiteConnection WaitForConnection(CancellationToken token)
@@ -421,61 +475,21 @@ namespace SimulationSpeedTimer
                 {
                     try
                     {
-                        using (var cmd = conn.CreateCommand())
+                        var requiredSchema = _config.RequiredSchema;
+                        if (ValidateRequiredSchema(conn, requiredSchema))
                         {
-                            cmd.CommandText = "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='Object_Info'";
-                            var result = cmd.ExecuteScalar();
-                            if (result == null || Convert.ToInt32(result) == 0)
-                            {
-                                token.WaitHandle.WaitOne(500);
-                                continue;
-                            }
+                            SharedFrameRepository.Instance.TrySetSchema(requiredSchema, Id);
+                            return requiredSchema;
                         }
 
-                        var schema = LoadSchemaFailedSafe(conn);
-                        if (schema != null && ValidateSchema(conn, schema))
-                        {
-                            SharedFrameRepository.Instance.Schema = schema;
-                            return schema;
-                        }
-                        token.WaitHandle.WaitOne(1000);
+                        token.WaitHandle.WaitOne(500);
                     }
                     catch { token.WaitHandle.WaitOne(1000); }
                 }
                 return null;
             }
 
-            private SimulationSchema LoadSchemaFailedSafe(SQLiteConnection conn)
-            {
-                try
-                {
-                    var schema = new SimulationSchema();
-                    using (var cmd = conn.CreateCommand())
-                    {
-                        cmd.CommandText = "SELECT object_name, table_name FROM Object_Info";
-                        using (var reader = cmd.ExecuteReader())
-                        {
-                            while (reader.Read()) schema.AddTable(new SchemaTableInfo(reader["table_name"]?.ToString(), reader["object_name"]?.ToString()));
-                        }
-                    }
-                    using (var cmd = conn.CreateCommand())
-                    {
-                        cmd.CommandText = "SELECT table_name, column_name, attribute_name, data_type FROM Column_Info";
-                        using (var reader = cmd.ExecuteReader())
-                        {
-                            while (reader.Read())
-                            {
-                                var t = schema.GetTable(reader["table_name"]?.ToString());
-                                t?.AddColumn(new SchemaColumnInfo(reader["column_name"]?.ToString(), reader["attribute_name"]?.ToString(), reader["data_type"]?.ToString()));
-                            }
-                        }
-                    }
-                    return schema;
-                }
-                catch { return null; }
-            }
-
-            private bool ValidateSchema(SQLiteConnection conn, SimulationSchema schema)
+            private bool ValidateRequiredSchema(SQLiteConnection conn, SimulationSchema schema)
             {
                 try
                 {
@@ -485,7 +499,7 @@ namespace SimulationSpeedTimer
                     {
                         using (var cmd = conn.CreateCommand())
                         {
-                            cmd.CommandText = $"PRAGMA table_info({tableInfo.TableName})";
+                            cmd.CommandText = $"PRAGMA table_info({QuoteIdentifier(tableInfo.TableName)})";
                             var actualColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                             using (var reader = cmd.ExecuteReader())
                             {
@@ -494,20 +508,14 @@ namespace SimulationSpeedTimer
 
                             if (!actualColumns.Contains("s_time")) return false;
 
-                            int physicalTotalCount = actualColumns.Count;
-                            int metaDataCount = tableInfo.ColumnsByPhysicalName.Count;
+                            foreach (var requiredColumn in tableInfo.ColumnsByPhysicalName.Keys)
+                            {
+                                if (string.Equals(requiredColumn, "s_time", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    continue;
+                                }
 
-                            string logicalName = tableInfo.ObjectName;
-                            if (_config.ExpectedColumnCounts != null &&
-                                !string.IsNullOrEmpty(logicalName) &&
-                                _config.ExpectedColumnCounts.TryGetValue(logicalName, out int expectedTotalCount))
-                            {
-                                if (physicalTotalCount != expectedTotalCount) return false;
-                                if ((metaDataCount + 1) != expectedTotalCount) return false;
-                            }
-                            else
-                            {
-                                if (physicalTotalCount != (metaDataCount + 1)) return false;
+                                if (!actualColumns.Contains(requiredColumn)) return false;
                             }
                         }
                     }
@@ -516,18 +524,6 @@ namespace SimulationSpeedTimer
                 catch { return false; }
             }
 
-            private void TryCheckpoint(SQLiteConnection conn)
-            {
-                try
-                {
-                    using (var cmd = conn.CreateCommand())
-                    {
-                        cmd.CommandText = "PRAGMA wal_checkpoint(PASSIVE);";
-                        cmd.ExecuteNonQuery();
-                    }
-                }
-                catch { }
-            }
         }
     }
 }

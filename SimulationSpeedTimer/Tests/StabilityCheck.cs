@@ -37,16 +37,13 @@ namespace SimulationSpeedTimer.Tests
             vm.SelectedTableName = TableName;
 
             // 3. Start Session & Service
-            // Context Start (Generates Session ID)
-            SimulationContext.Instance.Start(); // No args
-
-            // Service Start
             var gdConfig = new GlobalDataService.GlobalDataServiceConfig
             {
                 DbPath = TestDbPath,
-                QueryInterval = 0.5
+                QueryInterval = 0.5,
+                RequiredSchema = BuildRequiredSchema()
             };
-            GlobalDataService.Instance.Start(gdConfig);
+            SimulationContext.Instance.StartAsync(gdConfig).GetAwaiter().GetResult();
 
             Console.WriteLine("[Phase 1] Data Integrity Check (Sparse Data)");
             // Scenario: 0.0(Data), 0.5(Empty), 1.0(Data)
@@ -123,8 +120,7 @@ namespace SimulationSpeedTimer.Tests
             Console.WriteLine($"\n[Stability]: OK");
 
             // Cleanup
-            GlobalDataService.Instance.Stop();
-            SimulationContext.Instance.Stop();
+            SimulationContext.Instance.StopAsync().GetAwaiter().GetResult();
             Environment.Exit(0);
         }
 
@@ -172,6 +168,15 @@ namespace SimulationSpeedTimer.Tests
             {
                 cmd.ExecuteNonQuery();
             }
+        }
+
+        private static SimulationSchema BuildRequiredSchema()
+        {
+            var schema = new SimulationSchema();
+            var table = new SchemaTableInfo(TableName, "StabilityObject");
+            table.AddColumn(new SchemaColumnInfo("Value", "Value", "DOUBLE"));
+            schema.AddTable(table);
+            return schema;
         }
     }
 }
