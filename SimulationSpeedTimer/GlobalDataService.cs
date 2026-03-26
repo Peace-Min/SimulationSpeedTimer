@@ -36,7 +36,7 @@ namespace SimulationSpeedTimer
             public int RetryCount { get; set; } = 0; 
             public int RetryIntervalMs { get; set; } = 10;
 
-            public Dictionary<string, int> ExpectedColumnCounts { get; set; } = new Dictionary<string, int>();
+            public Dictionary<string, List<string>> ExpectedColumns { get; set; } = new Dictionary<string, List<string>>();
         }
 
         public void Start(GlobalDataServiceConfig config)
@@ -494,19 +494,24 @@ namespace SimulationSpeedTimer
 
                             if (!actualColumns.Contains("s_time")) return false;
 
-                            int physicalTotalCount = actualColumns.Count;
-                            int metaDataCount = tableInfo.ColumnsByPhysicalName.Count;
-
                             string logicalName = tableInfo.ObjectName;
-                            if (_config.ExpectedColumnCounts != null &&
+                            if (_config.ExpectedColumns != null &&
                                 !string.IsNullOrEmpty(logicalName) &&
-                                _config.ExpectedColumnCounts.TryGetValue(logicalName, out int expectedTotalCount))
+                                _config.ExpectedColumns.TryGetValue(logicalName, out var expectedLogicalColumns))
                             {
-                                if (physicalTotalCount != expectedTotalCount) return false;
-                                if ((metaDataCount + 1) != expectedTotalCount) return false;
+                                foreach (var expectedPropName in expectedLogicalColumns)
+                                {
+                                    if (!tableInfo.ColumnsByAttributeName.TryGetValue(expectedPropName, out var mappedColInfo))
+                                        return false;
+                                        
+                                    if (!actualColumns.Contains(mappedColInfo.ColumnName))
+                                        return false;
+                                }
                             }
                             else
                             {
+                                int physicalTotalCount = actualColumns.Count;
+                                int metaDataCount = tableInfo.ColumnsByPhysicalName.Count;
                                 if (physicalTotalCount != (metaDataCount + 1)) return false;
                             }
                         }
