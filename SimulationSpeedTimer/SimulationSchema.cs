@@ -114,6 +114,20 @@ namespace SimulationSpeedTimer
                 ColumnsByAttributeName[column.AttributeName] = column;
             }
         }
+
+        /// <summary>
+        /// 특정 컬럼들만 남기고 나머지는 제거합니다. (가지치기)
+        /// </summary>
+        /// <param name="filteredColumns">남길 컬럼 목록</param>
+        public void SetFilteredColumns(List<SchemaColumnInfo> filteredColumns)
+        {
+            ColumnsByPhysicalName.Clear();
+            ColumnsByAttributeName.Clear();
+            foreach (var col in filteredColumns)
+            {
+                AddColumn(col);
+            }
+        }
         
         /// <summary>
         /// 순회 및 쿼리 생성을 위한 컬럼 리스트 반환

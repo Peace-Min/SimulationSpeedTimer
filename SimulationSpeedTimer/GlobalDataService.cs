@@ -33,7 +33,7 @@ namespace SimulationSpeedTimer
             public string DbPath { get; set; }
             public double QueryInterval { get; set; } = 1.0;
             // [Refactored] Retry 관련 설정 (사용하지 않음, 호환성 유지)
-            public int RetryCount { get; set; } = 0; 
+            public int RetryCount { get; set; } = 0;
             public int RetryIntervalMs { get; set; } = 10;
 
             public Dictionary<string, List<string>> ExpectedColumns { get; set; } = new Dictionary<string, List<string>>();
@@ -370,13 +370,13 @@ namespace SimulationSpeedTimer
                                         string colName = reader.GetName(i);
                                         if (colName == "s_time") continue;
 
-                                        string resolvedColName = colName;
+                                        // [Filtering Logic] 스키마에 정의된(필터링되어 남은) 컬럼에 대해서만 데이터 매핑 수행
                                         if (tableInfo.ColumnsByPhysicalName.TryGetValue(colName, out var colInfo))
                                         {
-                                            resolvedColName = colInfo.AttributeName;
+                                            var val = reader.GetValue(i);
+                                            if (val != DBNull.Value)
+                                                tableData.AddColumn(colInfo.AttributeName, val);
                                         }
-                                        var val = reader.GetValue(i);
-                                        if (val != DBNull.Value) tableData.AddColumn(resolvedColName, val);
                                     }
                                 }
                             }
@@ -433,8 +433,12 @@ namespace SimulationSpeedTimer
                         }
 
                         var schema = LoadSchemaFailedSafe(conn);
-                        if (schema != null && ValidateSchema(conn, schema))
+                        if (schema != null && ValidateSchema(schema))
                         {
+                            // 3. 검증 성공 시! -> 불필요한 컬럼 가지치기(필터링) 수행
+                            FilterSchemaByConfig(schema);
+
+                            // 4. 깔끔하게 정리된 스키마를 저장 후 반환
                             SharedFrameRepository.Instance.Schema = schema;
                             return schema;
                         }
@@ -475,50 +479,59 @@ namespace SimulationSpeedTimer
                 catch { return null; }
             }
 
-            private bool ValidateSchema(SQLiteConnection conn, SimulationSchema schema)
+            private bool ValidateSchema(SimulationSchema schema)
             {
                 try
                 {
-                    if (schema.Tables == null || !schema.Tables.Any()) return false;
+                    // 0. 테이블이 하나도 없는 경우도 아직 로딩 전으로 간주
+                    if ((schema.Tables == null) || (!schema.Tables.Any())) { return false; }
 
-                    foreach (var tableInfo in schema.Tables)
+                    // 1. 읽어온 테이블의 갯수가 Config에 설정된 테이블에 갯수와 다른 경우.
+                    // (Config가 설정되어 있을 때만 개수 비교 수행)
+                    if (_config.ExpectedColumns != null && _config.ExpectedColumns.Count > 0)
                     {
-                        using (var cmd = conn.CreateCommand())
+                        if (schema.Tables.Count() != _config.ExpectedColumns.Count) return false;
+
+                        foreach (var tableInfo in schema.Tables)
                         {
-                            cmd.CommandText = $"PRAGMA table_info({tableInfo.TableName})";
-                            var actualColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                            using (var reader = cmd.ExecuteReader())
+                            if (!_config.ExpectedColumns.TryGetValue(tableInfo.ObjectName, out var targetColumnList))
                             {
-                                while (reader.Read()) actualColumns.Add(reader["name"]?.ToString());
+                                return false; // Config에 없는 테이블이 스키마에 있음
                             }
 
-                            if (!actualColumns.Contains("s_time")) return false;
-
-                            string logicalName = tableInfo.ObjectName;
-                            if (_config.ExpectedColumns != null &&
-                                !string.IsNullOrEmpty(logicalName) &&
-                                _config.ExpectedColumns.TryGetValue(logicalName, out var expectedLogicalColumns))
-                            {
-                                foreach (var expectedPropName in expectedLogicalColumns)
-                                {
-                                    if (!tableInfo.ColumnsByAttributeName.TryGetValue(expectedPropName, out var mappedColInfo))
-                                        return false;
-                                        
-                                    if (!actualColumns.Contains(mappedColInfo.ColumnName))
-                                        return false;
-                                }
-                            }
-                            else
-                            {
-                                int physicalTotalCount = actualColumns.Count;
-                                int metaDataCount = tableInfo.ColumnsByPhysicalName.Count;
-                                if (physicalTotalCount != (metaDataCount + 1)) return false;
-                            }
+                            // 2. 읽어온 테이블의 컬럼 목록에서 Config에 설정된 컬럼이 전부 포함되지 않은 경우.
+                            // 2. 읽어온 테이블의 컬럼 목록에서 Config에 설정된 컬럼이 전부 포함되지 않은 경우.
+                            var loadedAttributes = new HashSet<string>(tableInfo.Columns.Select(c => c.AttributeName));
+                            if (!loadedAttributes.IsSupersetOf(targetColumnList)) { return false; }
                         }
                     }
+
                     return true;
                 }
                 catch { return false; }
+            }
+
+            private void FilterSchemaByConfig(SimulationSchema schema)
+            {
+                if (_config.ExpectedColumns == null || _config.ExpectedColumns.Count == 0) return;
+
+                foreach (var table in schema.Tables)
+                {
+                    if (_config.ExpectedColumns.TryGetValue(table.ObjectName, out var targetColumns))
+                    {
+                        // 1. 대소문자를 명확히 구분하는 HashSet 생성
+                        var allowedAttributes = new HashSet<string>(targetColumns);
+
+                        // 2. Config에 대소문자까지 완벽히 일치하게 적힌 컬럼 + 필수 컬럼("s_time")만 추출
+                        var filteredColumns = table.Columns
+                            .Where(c => allowedAttributes.Contains(c.AttributeName) ||
+                                        c.ColumnName == "s_time")
+                            .ToList();
+
+                        // 3. 필터링된 컬럼으로 기존 스키마 덮어쓰기
+                        table.SetFilteredColumns(filteredColumns);
+                    }
+                }
             }
 
             private void TryCheckpoint(SQLiteConnection conn)
