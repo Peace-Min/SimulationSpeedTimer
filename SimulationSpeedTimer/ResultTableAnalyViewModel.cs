@@ -181,11 +181,6 @@ namespace SimulationSpeedTimer
                                             continue;
                                         }
 
-                                        if ((kvp.Value is string stringValue) && (stringValue == "-"))
-                                        {
-                                            continue;
-                                        }
-
                                         rowDict[kvp.Key] = kvp.Value;
                                     }
                                 }
@@ -236,7 +231,7 @@ namespace SimulationSpeedTimer
             {
                 foreach (var colName in configuredFields)
                 {
-                    dict[colName] = "-";
+                    dict[colName] = null;
                 }
             }
 
@@ -375,7 +370,8 @@ namespace SimulationSpeedTimer
                     {
                         tableName = parentTableName;
                     }
-                    else if (!_rowCache.ContainsKey(tableName))
+
+                    if (!_rowCache.ContainsKey(tableName))
                     {
                         continue;
                     }
@@ -399,24 +395,59 @@ namespace SimulationSpeedTimer
             _configuredFieldCache.Clear();
             _rowIndexCache.Clear();
 
+            var localSubcomponentParentMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            if (subcomponentLinks != null)
+            {
+                foreach (var link in subcomponentLinks)
+                {
+                    if (link == null ||
+                        string.IsNullOrEmpty(link.SubcomponentTableName) ||
+                        string.IsNullOrEmpty(link.ParentTableName))
+                    {
+                        continue;
+                    }
+
+                    localSubcomponentParentMap[link.SubcomponentTableName] = link.ParentTableName;
+                }
+            }
+
             // 0. 테이블 기준 반복문 수행.
             foreach (var tableConfig in tableConfigs)
             {
                 if (tableConfig.Bands.Count == 0) { continue; }
 
+                var targetTableName = tableConfig.TableObjectName;
+                if (localSubcomponentParentMap.TryGetValue(tableConfig.TableObjectName, out var parentTableName))
+                {
+                    targetTableName = parentTableName;
+                }
+
                 // 1. 행 데이터 컬렉션 생성
-                var rows = new ObservableCollectionCore<ExpandoObject>();
+                if (!_rowCache.TryGetValue(targetTableName, out var rows))
+                {
+                    rows = new ObservableCollectionCore<ExpandoObject>();
 
-                // WPF 백그라운드 스레드 업데이트 지원 설정
-                BindingOperations.EnableCollectionSynchronization(rows, _collectionLock);
+                    // WPF 백그라운드 스레드 업데이트 지원 설정
+                    BindingOperations.EnableCollectionSynchronization(rows, _collectionLock);
 
-                _rowCache[tableConfig.TableObjectName] = rows;
+                    _rowCache[targetTableName] = rows;
+                }
 
                 // 2. 밴드 구성.
-                var timeColumn = new GridColumnItem() { FieldName = "Time", Header = "Time" }; // 시간 컬럼(고정).
-                var timeBand = new GridBandItem() { Header = "Time", ColumnItems = new ObservableCollection<GridColumnItem>() { timeColumn } }; // 시간 밴드(고정).
-                var bands = new ObservableCollection<GridBandItem>() { timeBand };
-                var configuredFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (!_bandCache.TryGetValue(targetTableName, out var bands))
+                {
+                    var timeColumn = new GridColumnItem() { FieldName = "Time", Header = "Time" }; // 시간 컬럼(고정).
+                    var timeBand = new GridBandItem() { Header = "Time", ColumnItems = new ObservableCollection<GridColumnItem>() { timeColumn } }; // 시간 밴드(고정).
+                    bands = new ObservableCollection<GridBandItem>() { timeBand };
+                    _bandCache[targetTableName] = bands;
+                }
+
+                if (!_configuredFieldCache.TryGetValue(targetTableName, out var configuredFields))
+                {
+                    configuredFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    _configuredFieldCache[targetTableName] = configuredFields;
+                }
 
                 foreach (var band in tableConfig.Bands)
                 {
@@ -424,18 +455,23 @@ namespace SimulationSpeedTimer
                     {
                         Header = band.Header,
                     };
-                    addBand.ColumnItems.AddRange(band.Columns.Select(c => new GridColumnItem { FieldName = c.FieldName, Header = c.Header }));
 
                     foreach (var column in band.Columns)
                     {
+                        if (configuredFields.Contains(column.FieldName))
+                        {
+                            continue;
+                        }
+
+                        addBand.ColumnItems.Add(new GridColumnItem { FieldName = column.FieldName, Header = column.Header });
                         configuredFields.Add(column.FieldName);
                     }
 
-                    bands.Add(addBand);
+                    if (addBand.ColumnItems.Count > 0)
+                    {
+                        bands.Add(addBand);
+                    }
                 }
-
-                _bandCache[tableConfig.TableObjectName] = bands;
-                _configuredFieldCache[tableConfig.TableObjectName] = configuredFields;
             }
 
             if (subcomponentLinks != null)
@@ -445,11 +481,11 @@ namespace SimulationSpeedTimer
                     if (link == null ||
                         string.IsNullOrEmpty(link.SubcomponentTableName) ||
                         string.IsNullOrEmpty(link.ParentTableName)) continue;
-                    if (!_rowCache.ContainsKey(link.ParentTableName)) continue;
 
                     _subcomponentParentMap[link.SubcomponentTableName] = link.ParentTableName;
 
-                    if (!_rowIndexCache.ContainsKey(link.ParentTableName))
+                    if (_rowCache.ContainsKey(link.ParentTableName) &&
+                        !_rowIndexCache.ContainsKey(link.ParentTableName))
                     {
                         _rowIndexCache[link.ParentTableName] = new Dictionary<double, ExpandoObject>();
                     }
