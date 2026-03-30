@@ -437,6 +437,11 @@ namespace SimulationSpeedTimer
                         {
                             // 3. 검증 성공 시! -> 불필요한 컬럼 가지치기(필터링) 수행
                             FilterSchemaByConfig(schema);
+                            if (!ValidateFilteredTablesReady(conn, schema))
+                            {
+                                token.WaitHandle.WaitOne(1000);
+                                continue;
+                            }
 
                             // 4. 깔끔하게 정리된 스키마를 저장 후 반환
                             SharedFrameRepository.Instance.Schema = schema;
@@ -531,6 +536,36 @@ namespace SimulationSpeedTimer
                         // 3. 필터링된 컬럼으로 기존 스키마 덮어쓰기
                         table.SetFilteredColumns(filteredColumns);
                     }
+                }
+            }
+
+            private bool ValidateFilteredTablesReady(SQLiteConnection conn, SimulationSchema schema)
+            {
+                if (conn == null || schema == null || schema.Tables == null)
+                {
+                    return false;
+                }
+
+                try
+                {
+                    foreach (var table in schema.Tables)
+                    {
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.CommandText = $"SELECT count(*) FROM {table.TableName}";
+                            cmd.ExecuteScalar();
+                        }
+                    }
+
+                    return true;
+                }
+                catch (SQLiteException)
+                {
+                    return false;
+                }
+                catch
+                {
+                    return false;
                 }
             }
 
