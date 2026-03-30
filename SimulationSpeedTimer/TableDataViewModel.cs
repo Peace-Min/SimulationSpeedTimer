@@ -372,10 +372,4 @@ namespace SimulationSpeedTimer
         public string FieldName { get; set; }  // DB 컬럼명 (데이터 매핑용)
         public string Header { get; set; }     // UI 헤더 표시용
     }
-
-    public class SubcomponentLink
-    {
-        public string SubcomponentTableName { get; set; }
-        public string ParentTableName { get; set; }
-    }
 }

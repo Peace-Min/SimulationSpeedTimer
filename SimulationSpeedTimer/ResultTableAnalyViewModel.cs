@@ -3,132 +3,240 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.ComponentModel;
 using System.Dynamic;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Windows.Data;
 using System.Windows.Threading;
 
 namespace SimulationSpeedTimer
 {
-    /// <summary>
-    /// 실제 SW 환경을 기준으로 한 ResultTableAnalyViewModel 스케치입니다.
-    /// 이 파일은 현재 csproj에 포함되지 않으며, 구조 설명과 이식용 코드 목적입니다.
-    ///
-    /// 핵심 정책:
-    /// 1. 모든 테이블 데이터는 메모리 저장소에 유지
-    /// 2. GridControl은 현재 선택된 테이블의 PagedAsyncSource만 바인딩
-    /// 3. 수신 시 전체 테이블 저장은 하되, UI 갱신은 선택된 테이블 source만 refresh
-    /// 4. leaf node로 선택된 컬럼만 메모리에 저장해 row payload를 줄임
-    /// </summary>
-    public class ResultTableAnalyViewModel : INotifyPropertyChanged, IDisposable
+    public class SubcomponentLink
     {
-        private readonly ConcurrentDictionary<string, TablePageStore> _tableStores =
-            new ConcurrentDictionary<string, TablePageStore>(StringComparer.OrdinalIgnoreCase);
+        public string SubcomponentTableName { get; set; }
 
-        private readonly Dictionary<string, ObservableCollection<GridBandItem>> _bandCache =
-            new Dictionary<string, ObservableCollection<GridBandItem>>(StringComparer.OrdinalIgnoreCase);
+        public string ParentTableName { get; set; }
+    }
 
-        private readonly Dictionary<string, HashSet<string>> _configuredFieldsByTable =
-            new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+    public class RowPatch
+    {
+        public double Time { get; set; }
 
-        private readonly DispatcherTimer _selectedTableRefreshTimer;
+        public Dictionary<string, object> FieldValues { get; set; }
+    }
 
+    public class ResultTableAnalyViewModel : ViewModelBase
+    {
+        private const int BatchCount = 3000;
+        private readonly object _collectionLock = new object();
+
+        private bool _isUpdating = false;
         private Guid _currentSessionId = Guid.Empty;
-        private string _selectedTableName;
-        private PagedAsyncSource _items;
-        private bool _selectedTableDirty;
+        private ConcurrentDictionary<string, ConcurrentQueue<RowPatch>> _pendingBuffer = new ConcurrentDictionary<string, ConcurrentQueue<RowPatch>>();
+        private DispatcherTimer _uiRefreshTimer;
+        private Dictionary<string, ObservableCollection<GridBandItem>> _bandCache;
+        private Dictionary<string, ObservableCollectionCore<ExpandoObject>> _rowCache;
 
-        public ModelTreeViewModel ModelTreeViewModel { get; private set; }
+        private Dictionary<string, string> _subcomponentParentMap;
+        private Dictionary<string, HashSet<string>> _configuredFieldCache;
+        private Dictionary<string, Dictionary<double, ExpandoObject>> _rowIndexCache;
+
+        public string SelectedTableName
+        {
+            get => GetValue<string>();
+            set
+            {
+                SetValue(value);
+                RaisePropertiesChanged(nameof(Bands));
+                RaisePropertiesChanged(nameof(Items));
+            }
+        }
 
         /// <summary>
-        /// 현재 선택된 테이블의 밴드 정의입니다.
-        /// 현재 XAML 호환을 위해 유지합니다.
+        /// GridControl 동적 컬림 바인딩 컬렉션.
         /// </summary>
         public ObservableCollection<GridBandItem> Bands
         {
             get
             {
-                if (string.IsNullOrEmpty(_selectedTableName))
-                {
-                    return null;
-                }
-
-                return _bandCache.TryGetValue(_selectedTableName, out var bands) ? bands : null;
+                var isVisibleTabName = !string.IsNullOrEmpty(SelectedTableName) && _bandCache.ContainsKey(SelectedTableName);
+                return isVisibleTabName ? _bandCache[SelectedTableName] : null;
             }
         }
 
         /// <summary>
-        /// GridControl ItemsSource에 직접 바인딩하는 가상 데이터 소스입니다.
-        /// 선택된 테이블이 바뀔 때마다 새 source로 교체합니다.
+        /// GridControl 아이템소스 컬렉션.
         /// </summary>
-        public PagedAsyncSource Items
+        public ObservableCollection<ExpandoObject> Items
         {
-            get => _items;
-            private set
+            get
             {
-                if (ReferenceEquals(_items, value))
-                {
-                    return;
-                }
-
-                _items = value;
-                OnPropertyChanged(nameof(Items));
+                var isVisibleTabName = !string.IsNullOrEmpty(SelectedTableName) && _rowCache.ContainsKey(SelectedTableName);
+                return isVisibleTabName ? _rowCache[SelectedTableName] : null;
             }
         }
 
-        public string SelectedTableName
-        {
-            get => _selectedTableName;
-            set
-            {
-                if (string.Equals(_selectedTableName, value, StringComparison.OrdinalIgnoreCase))
-                {
-                    return;
-                }
-
-                _selectedTableName = value;
-                OnPropertyChanged(nameof(SelectedTableName));
-                OnPropertyChanged(nameof(Bands));
-                SwitchSelectedTableSource();
-            }
-        }
+        /// <summary>
+        /// 화면 좌측 객체리스트 ViewModel.
+        /// </summary>
+        public ModelTreeViewModel ModelTreeViewModel { get; set; }
 
         public ResultTableAnalyViewModel()
         {
-            ModelTreeViewModel = new ModelTreeViewModel();
-
-            // PagedAsyncSource refresh를 너무 자주 호출하지 않도록 선택 테이블만 throttle 합니다.
-            _selectedTableRefreshTimer = new DispatcherTimer(DispatcherPriority.Background);
-            _selectedTableRefreshTimer.Interval = TimeSpan.FromMilliseconds(100);
-            _selectedTableRefreshTimer.Tick += OnSelectedTableRefreshTimerTick;
-            _selectedTableRefreshTimer.Start();
-
+            Initialize();
             SubscribeEvents();
         }
 
-        private void SubscribeEvents()
+        private void Initialize()
         {
-            ModelTreeViewModel.OnSelectedModelTreeData += ModelTreeViewModel_OnSelectedModelTreeData;
-            SimulationContext.Instance.OnSessionStarted += HandleSessionStarted;
-            SharedFrameRepository.Instance.OnFramesAdded += HandleFramesAdded;
+            ModelTreeViewModel = new ModelTreeViewModel();
+            _bandCache = new Dictionary<string, ObservableCollection<GridBandItem>>();
+            _rowCache = new Dictionary<string, ObservableCollectionCore<ExpandoObject>>();
+            _subcomponentParentMap = new Dictionary<string, string>();
+            _configuredFieldCache = new Dictionary<string, HashSet<string>>();
+            _rowIndexCache = new Dictionary<string, Dictionary<double, ExpandoObject>>();
 
-            // 실제 SW에서 사용 중인 시나리오 설정 이벤트를 그대로 가정합니다.
-            AddSIMManagerHandler.GetInstance().OnScenarioSetupCompleted += ResultTableAnalyViewModel_OnScenarioSetupCompleted;
+            _uiRefreshTimer = new DispatcherTimer(DispatcherPriority.Background);
+            _uiRefreshTimer.Interval = TimeSpan.FromMilliseconds(100);
+            _uiRefreshTimer.Tick += OnUIRefreshTimerTick;
+            _uiRefreshTimer.Start();
         }
 
-        private void ResultTableAnalyViewModel_OnScenarioSetupCompleted(object sender, EventArgs e)
+        /// <summary>
+        /// UI Thread에 대한 주기적 배치 업데이트 수행.
+        /// </summary>
+        private async void OnUIRefreshTimerTick(object sender, EventArgs e)
         {
-            SelectedTableName = null;
-
-            var currentScenario = AddSIMManagerHandler.GetInstance().GetCurrentScenario();
-            if (currentScenario == null)
+            if (_isUpdating || string.IsNullOrEmpty(SelectedTableName))
             {
                 return;
             }
 
-            var tableConfigs = new List<TableConfig>();
-            var journalingNodes = ScenarioQueries.For(currentScenario).AttributeQuery().JournalingData(true).ToLeavesByObject();
+            var selectedTableName = SelectedTableName;
+
+            if (_pendingBuffer.TryGetValue(selectedTableName, out var queue))
+            {
+                if (queue.IsEmpty)
+                {
+                    return;
+                }
+
+                if (!_rowCache.TryGetValue(selectedTableName, out var targetCollection))
+                {
+                    return;
+                }
+
+                if (!_rowIndexCache.TryGetValue(selectedTableName, out var rowIndex))
+                {
+                    return;
+                }
+
+                _isUpdating = true;
+                try
+                {
+                    var batchItems = await Task.Run(() =>
+                    {
+                        var items = new List<RowPatch>();
+                        var count = 0;
+
+                        while (count < BatchCount && queue.TryDequeue(out var item))
+                        {
+                            items.Add(item);
+                            count++;
+                        }
+
+                        return items;
+                    });
+
+                    if (batchItems.Count > 0)
+                    {
+                        try
+                        {
+                            targetCollection.BeginUpdate();
+                            foreach (var patch in batchItems)
+                            {
+                                if (!rowIndex.TryGetValue(patch.Time, out var row))
+                                {
+                                    row = CreateExpandoRow(patch.Time, patch.FieldValues);
+                                    rowIndex[patch.Time] = row;
+                                    targetCollection.Add(row);
+                                    continue;
+                                }
+
+                                var dict = (IDictionary<string, object>)row;
+                                foreach (var pair in patch.FieldValues)
+                                {
+                                    dict[pair.Key] = pair.Value;
+                                }
+                            }
+                        }
+                        finally
+                        {
+                            targetCollection.EndUpdate();
+                        }
+                    }
+                }
+                finally
+                {
+                    _isUpdating = false;
+                }
+            }
+        }
+
+        private ExpandoObject CreateExpandoRow(double time, IDictionary<string, object> fieldValues)
+        {
+            var row = new ExpandoObject();
+            var dict = (IDictionary<string, object>)row;
+
+            dict[AppConst.TimeAttributeName] = time;
+            foreach (var pair in fieldValues)
+            {
+                dict[pair.Key] = pair.Value;
+            }
+
+            return row;
+        }
+
+        #region Command & Command Method(Command 관련 선언)
+        #endregion
+
+        #region EventHandlers & Subscriptions (이벤트 핸들러, 메시지 구독자, 통신 응답 처리 관련)
+        private void SubscribeEvents()
+        {
+            ModelTreeViewModel.OnSelectedModelTreeData += ModelTreeViewModel_OnSelectedModelTreeData;
+            SimulationContext.Instance.OnSessionStarted += HandleSessionStarted;
+            SimulationContext.Instance.OnSessionStopped += Instance_OnSessionStopped;
+            SharedFrameRepository.Instance.OnFramesAdded += HandleFramesAdded;
+            AddSIMManagerHandler.GetInstance().OnScenarioSetupCompleted += ResultTableAnalyViewModel_OnScenarioSetupCompleted;
+        }
+
+        /// <summary>
+        /// 컬럼 정보 업데이트
+        /// </summary>
+        private void ResultTableAnalyViewModel_OnScenarioSetupCompleted(object sender, EventArgs e)
+        {
+            SelectedTableName = default;
+
+            var currentCurrentScenario = AddSIMManagerHandler.GetInstance().GetCurrentScenario();
+            if (currentCurrentScenario == null)
+            {
+                return;
+            }
+
+            var subcomponentLinks = new List<SubcomponentLink>();
+            var tableConfigDTOList = new List<TableConfig>();
+            var journalingNodes = ScenarioQueries.For(currentCurrentScenario).AttributeQuery().JournalingData(true).ToLeavesByObject();
+            var subComponentJournalingNodes = ScenarioQueries.For(currentCurrentScenario).AttributeQuery().JournalingData(true).ToLeavesBySubComponentObject();
+
+            foreach (var subComponent in subComponentJournalingNodes)
+            {
+                var subComponentLink = new SubcomponentLink
+                {
+                    SubcomponentTableName = subComponent.Key.Path,
+                    ParentTableName = subComponent.Key.ParentNode.Name,
+                };
+                subcomponentLinks.Add(subComponentLink);
+            }
 
             foreach (var node in journalingNodes)
             {
@@ -137,24 +245,29 @@ namespace SimulationSpeedTimer
                     continue;
                 }
 
-                var tableConfig = new TableConfig(node.Key.playerObjectName);
-
+                var addTableConfig = new TableConfig(node.Key.playerObjectName);
                 foreach (var leafNode in node.Value)
                 {
-                    var tempBand = new BandConfig(string.Empty);
+                    var tempBandConfig = new BandConfig(string.Empty);
+
                     var (_, attributeName) = AttributeInfoParser.DeconstructFullPath(leafNode);
                     var (_, attributeLabel) = AttributeInfoParser.DeconstructFullLabel(leafNode);
 
-                    tempBand.Columns.Add(new ColumnConfig(attributeName, attributeLabel));
-                    tableConfig.Bands.Add(tempBand);
+                    var addColumnConfig = new ColumnConfig(attributeName, attributeLabel);
+
+                    tempBandConfig.Columns.Add(addColumnConfig);
+                    addTableConfig.Bands.Add(tempBandConfig);
                 }
 
-                tableConfigs.Add(tableConfig);
+                tableConfigDTOList.Add(addTableConfig);
             }
 
-            UpdateTableConfig(tableConfigs);
+            UpdateTableConfig(tableConfigDTOList, subcomponentLinks);
         }
 
+        /// <summary>
+        /// 객체 선택 이벤트 핸들러.
+        /// </summary>
         private void ModelTreeViewModel_OnSelectedModelTreeData(object sender, ModelTreeData e)
         {
             SelectedTableName = e.ObjectName;
@@ -163,112 +276,107 @@ namespace SimulationSpeedTimer
         private void HandleSessionStarted(Guid sessionId)
         {
             _currentSessionId = sessionId;
-            _selectedTableDirty = false;
 
-            foreach (var store in _tableStores.Values)
+            foreach (var queue in _pendingBuffer.Values)
             {
-                store.Clear();
+                while (queue.TryDequeue(out _))
+                {
+                }
             }
 
-            SwitchSelectedTableSource();
+            _pendingBuffer.Clear();
+            foreach (var rowIndex in _rowIndexCache.Values)
+            {
+                rowIndex.Clear();
+            }
+
+            foreach (var collection in _rowCache.Values)
+            {
+                collection.Clear();
+            }
+        }
+
+        private void Instance_OnSessionStopped()
+        {
+            _currentSessionId = Guid.Empty;
         }
 
         /// <summary>
-        /// 모든 테이블 데이터는 메모리 저장소에 유지하되, UI 갱신은 선택된 테이블 source만 표시합니다.
+        /// 공유 저장소로부터 데이터 수신.
+        /// 해당 메소드에서 직접 UI에 업데이트하지않고 수신 데이터 Enqueue만 수행.
         /// </summary>
         private void HandleFramesAdded(List<SimulationFrame> frames, Guid sessionId)
         {
-            if (_currentSessionId != sessionId || frames == null || frames.Count == 0)
+            if (_currentSessionId != sessionId)
+            {
+                return;
+            }
+
+            if (frames == null || frames.Count == 0)
             {
                 return;
             }
 
             foreach (var frame in frames)
             {
-                foreach (var tableName in _configuredFieldsByTable.Keys)
+                if (!frame.AllTables.Any())
                 {
-                    var tableData = frame.GetTable(tableName);
-                    if (tableData == null)
+                    continue;
+                }
+
+                var rowPatchCache = new Dictionary<string, Dictionary<string, object>>();
+
+                foreach (var tableData in frame.AllTables)
+                {
+                    if (!_subcomponentParentMap.TryGetValue(tableData.TableName, out var parentTableName))
                     {
                         continue;
                     }
 
-                    var row = CreateStoredRow(frame, tableName, tableData);
-                    if (row == null)
+                    if (!_configuredFieldCache.TryGetValue(parentTableName, out var configuredFields))
                     {
                         continue;
                     }
 
-                    var store = _tableStores.GetOrAdd(tableName, _ => new TablePageStore());
-                    store.Append(row);
-
-                    if (string.Equals(tableName, _selectedTableName, StringComparison.OrdinalIgnoreCase))
+                    if (!rowPatchCache.TryGetValue(parentTableName, out var fieldValues))
                     {
-                        _selectedTableDirty = true;
+                        fieldValues = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                        rowPatchCache[parentTableName] = fieldValues;
                     }
+
+                    foreach (var colName in tableData.ColumnNames)
+                    {
+                        if (!configuredFields.Contains(colName))
+                        {
+                            continue;
+                        }
+
+                        var value = tableData[colName];
+                        if (value != null)
+                        {
+                            fieldValues[colName] = value;
+                        }
+                    }
+                }
+
+                foreach (var patch in rowPatchCache)
+                {
+                    if (patch.Value.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var queue = _pendingBuffer.GetOrAdd(patch.Key, _ => new ConcurrentQueue<RowPatch>());
+                    queue.Enqueue(new RowPatch
+                    {
+                        Time = frame.Time,
+                        FieldValues = patch.Value
+                    });
                 }
             }
         }
 
-        private void OnSelectedTableRefreshTimerTick(object sender, EventArgs e)
-        {
-            if (!_selectedTableDirty || Items == null)
-            {
-                return;
-            }
-
-            _selectedTableDirty = false;
-            Items.RefreshRows();
-        }
-
-        /// <summary>
-        /// 선택된 테이블이 바뀌면 해당 테이블 전용 PagedAsyncSource를 새로 만듭니다.
-        /// 숨은 테이블은 더 이상 UI 컬렉션을 유지하지 않습니다.
-        /// </summary>
-        private void SwitchSelectedTableSource()
-        {
-            DisposeCurrentSource();
-
-            if (string.IsNullOrEmpty(_selectedTableName))
-            {
-                Items = null;
-                return;
-            }
-
-            Items = CreatePagedSource(_selectedTableName);
-            _selectedTableDirty = false;
-        }
-
-        private PagedAsyncSource CreatePagedSource(string tableName)
-        {
-            var source = new PagedAsyncSource
-            {
-                ElementType = typeof(ExpandoObject),
-                PageNavigationMode = PageNavigationMode.ArbitraryWithTotalPageCount
-            };
-
-            source.FetchPage += (s, e) =>
-            {
-                e.Result = FetchPageAsync(tableName, e);
-            };
-
-            return source;
-        }
-
-        private Task FetchPageAsync(string tableName, FetchPageAsyncEventArgs e)
-        {
-            var store = _tableStores.GetOrAdd(tableName, _ => new TablePageStore());
-
-            var rows = store.GetPage(e.Skip, e.Take)
-                .Select(CreateExpandoRow)
-                .Cast<object>()
-                .ToArray();
-
-            var hasMoreRows = e.Skip + rows.Length < store.Count;
-            return Task.FromResult(new FetchRowsResult(rows, hasMoreRows));
-        }
-
-        private void UpdateTableConfig(List<TableConfig> tableConfigs)
+        private void UpdateTableConfig(List<TableConfig> tableConfigs, IEnumerable<SubcomponentLink> subcomponentLinks)
         {
             if (tableConfigs == null)
             {
@@ -276,185 +384,87 @@ namespace SimulationSpeedTimer
             }
 
             _bandCache.Clear();
-            _configuredFieldsByTable.Clear();
-            _tableStores.Clear();
+            _rowCache.Clear();
+            _pendingBuffer.Clear();
+            _subcomponentParentMap.Clear();
+            _configuredFieldCache.Clear();
+            _rowIndexCache.Clear();
 
-            foreach (var table in tableConfigs)
+            foreach (var tableConfig in tableConfigs)
             {
-                if (table == null || string.IsNullOrEmpty(table.TableObjectName))
+                if (tableConfig.Bands.Count == 0)
                 {
                     continue;
                 }
 
-                var configuredFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                _subcomponentParentMap[tableConfig.TableObjectName] = tableConfig.TableObjectName;
+
+                var rows = new ObservableCollectionCore<ExpandoObject>();
+                BindingOperations.EnableCollectionSynchronization(rows, _collectionLock);
+
+                _rowCache[tableConfig.TableObjectName] = rows;
+                _rowIndexCache[tableConfig.TableObjectName] = new Dictionary<double, ExpandoObject>();
 
                 var timeColumn = new GridColumnItem
                 {
-                    FieldName = "Time",
-                    Header = "Time"
+                    FieldName = AppConst.TimeAttributeName,
+                    Header = AppConst.TimeAttributeName
                 };
 
                 var timeBand = new GridBandItem
                 {
-                    Header = "Time",
+                    Header = AppConst.TimeAttributeName,
                     ColumnItems = new ObservableCollection<GridColumnItem> { timeColumn }
                 };
 
                 var bands = new ObservableCollection<GridBandItem> { timeBand };
+                var configuredFields = new HashSet<string>();
 
-                foreach (var band in table.Bands)
+                foreach (var band in tableConfig.Bands)
                 {
-                    var addBand = new GridBandItem
+                    var addBand = new GridBandItem { Header = band.Header };
+                    var columns = band.Columns.Select(c => new GridColumnItem
                     {
-                        Header = band.Header
-                    };
+                        FieldName = c.FieldName,
+                        Header = c.Header
+                    });
 
-                    foreach (var column in band.Columns)
+                    foreach (var column in columns)
                     {
-                        addBand.ColumnItems.Add(new GridColumnItem
-                        {
-                            FieldName = column.FieldName,
-                            Header = column.Header
-                        });
-
+                        addBand.ColumnItems.Add(column);
                         configuredFields.Add(column.FieldName);
                     }
 
                     bands.Add(addBand);
                 }
 
-                _bandCache[table.TableObjectName] = bands;
-                _configuredFieldsByTable[table.TableObjectName] = configuredFields;
-                _tableStores[table.TableObjectName] = new TablePageStore();
+                _bandCache[tableConfig.TableObjectName] = bands;
+                _configuredFieldCache[tableConfig.TableObjectName] = configuredFields;
             }
 
-            OnPropertyChanged(nameof(Bands));
-            SwitchSelectedTableSource();
-        }
-
-        private StoredRow CreateStoredRow(SimulationFrame frame, string tableName, SimulationTable tableData)
-        {
-            if (!_configuredFieldsByTable.TryGetValue(tableName, out var configuredFields))
+            if (subcomponentLinks != null)
             {
-                return null;
-            }
-
-            var values = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var fieldName in configuredFields)
-            {
-                var value = tableData[fieldName];
-                if (value != null)
+                foreach (var link in subcomponentLinks)
                 {
-                    values[fieldName] = value;
-                }
-            }
-
-            return new StoredRow(frame.Time, values);
-        }
-
-        private ExpandoObject CreateExpandoRow(StoredRow storedRow)
-        {
-            var row = new ExpandoObject();
-            var dict = (IDictionary<string, object>)row;
-
-            dict["Time"] = storedRow.Time;
-
-            foreach (var pair in storedRow.Values)
-            {
-                dict[pair.Key] = pair.Value;
-            }
-
-            return row;
-        }
-
-        private void DisposeCurrentSource()
-        {
-            if (Items == null)
-            {
-                return;
-            }
-
-            Items.Dispose();
-            Items = null;
-        }
-
-        public void Dispose()
-        {
-            _selectedTableRefreshTimer.Stop();
-            _selectedTableRefreshTimer.Tick -= OnSelectedTableRefreshTimerTick;
-
-            if (ModelTreeViewModel != null)
-            {
-                ModelTreeViewModel.OnSelectedModelTreeData -= ModelTreeViewModel_OnSelectedModelTreeData;
-            }
-
-            SimulationContext.Instance.OnSessionStarted -= HandleSessionStarted;
-            SharedFrameRepository.Instance.OnFramesAdded -= HandleFramesAdded;
-            AddSIMManagerHandler.GetInstance().OnScenarioSetupCompleted -= ResultTableAnalyViewModel_OnScenarioSetupCompleted;
-
-            DisposeCurrentSource();
-        }
-
-        public event PropertyChangedEventHandler PropertyChanged;
-
-        protected virtual void OnPropertyChanged(string propertyName)
-        {
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        }
-
-        private sealed class TablePageStore
-        {
-            private readonly object _sync = new object();
-            private readonly List<StoredRow> _rows = new List<StoredRow>();
-
-            public int Count
-            {
-                get
-                {
-                    lock (_sync)
+                    if (link == null ||
+                        string.IsNullOrEmpty(link.SubcomponentTableName) ||
+                        string.IsNullOrEmpty(link.ParentTableName))
                     {
-                        return _rows.Count;
+                        continue;
                     }
+
+                    if (!_rowCache.ContainsKey(link.ParentTableName))
+                    {
+                        continue;
+                    }
+
+                    _subcomponentParentMap[link.SubcomponentTableName] = link.ParentTableName;
                 }
             }
 
-            public void Clear()
-            {
-                lock (_sync)
-                {
-                    _rows.Clear();
-                }
-            }
-
-            public void Append(StoredRow row)
-            {
-                lock (_sync)
-                {
-                    _rows.Add(row);
-                }
-            }
-
-            public IReadOnlyList<StoredRow> GetPage(int skip, int take)
-            {
-                lock (_sync)
-                {
-                    return _rows.Skip(skip).Take(take).ToList();
-                }
-            }
+            RaisePropertiesChanged(nameof(Bands));
+            RaisePropertiesChanged(nameof(Items));
         }
-
-        private sealed class StoredRow
-        {
-            public StoredRow(double time, Dictionary<string, object> values)
-            {
-                Time = time;
-                Values = values ?? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-            }
-
-            public double Time { get; }
-
-            public Dictionary<string, object> Values { get; }
-        }
+        #endregion
     }
 }
