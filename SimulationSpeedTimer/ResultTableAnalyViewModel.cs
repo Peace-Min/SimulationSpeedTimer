@@ -157,7 +157,7 @@ namespace SimulationSpeedTimer
                             {
                                 if (!rowIndex.TryGetValue(patch.Time, out var row))
                                 {
-                                    row = CreateExpandoRow(patch.Time, patch.FieldValues);
+                                    row = CreateExpandoRow(selectedTableName, patch.Time, patch.FieldValues);
                                     rowIndex[patch.Time] = row;
                                     targetCollection.Add(row);
                                     continue;
@@ -183,12 +183,20 @@ namespace SimulationSpeedTimer
             }
         }
 
-        private ExpandoObject CreateExpandoRow(double time, IDictionary<string, object> fieldValues)
+        private ExpandoObject CreateExpandoRow(string tableName, double time, IDictionary<string, object> fieldValues)
         {
             var row = new ExpandoObject();
             var dict = (IDictionary<string, object>)row;
 
             dict[AppConst.TimeAttributeName] = time;
+            if (_configuredFieldCache.TryGetValue(tableName, out var configuredFields))
+            {
+                foreach (var fieldName in configuredFields)
+                {
+                    dict[fieldName] = "—";
+                }
+            }
+
             foreach (var pair in fieldValues)
             {
                 dict[pair.Key] = pair.Value;
