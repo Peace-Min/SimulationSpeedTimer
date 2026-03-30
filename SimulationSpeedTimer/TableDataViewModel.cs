@@ -59,6 +59,18 @@ namespace SimulationSpeedTimer
         private readonly Dictionary<string, System.Collections.ObjectModel.ObservableCollection<System.Dynamic.ExpandoObject>> _rowCache
             = new Dictionary<string, System.Collections.ObjectModel.ObservableCollection<System.Dynamic.ExpandoObject>>();
 
+        // 서브컴포넌트 테이블명 -> 부모 컴포넌트 테이블명
+        private readonly Dictionary<string, string> _subcomponentParentMap
+            = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // 테이블별 허용 컬럼 캐시
+        private readonly Dictionary<string, HashSet<string>> _configuredFieldCache
+            = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+
+        // 같은 테이블/시간대 row를 다시 찾기 위한 인덱스 캐시
+        private readonly Dictionary<string, Dictionary<double, System.Dynamic.ExpandoObject>> _rowIndexCache
+            = new Dictionary<string, Dictionary<double, System.Dynamic.ExpandoObject>>(StringComparer.OrdinalIgnoreCase);
+
         // 컬렉션 동기화용 락 객체 (멀티스레드 Add 지원)
         private readonly object _collectionLock = new object();
 
@@ -79,18 +91,29 @@ namespace SimulationSpeedTimer
 
         // --- 외부 주입 메서드 ---
 
-        public void InitializeTableConfig(List<TableConfig> configs)
+        public void InitializeTableConfig(List<TableConfig> tableConfigs)
         {
-            if (configs == null) return;
+            InitializeTableConfig(tableConfigs, null);
+        }
+
+        public void InitializeTableConfig(List<TableConfig> tableConfigs, IEnumerable<SubcomponentLink> subcomponentLinks)
+        {
+            if (tableConfigs == null) return;
 
             TableNames.Clear();
             _columnCache.Clear();
             _rowCache.Clear();
+            _subcomponentParentMap.Clear();
+            _configuredFieldCache.Clear();
+            _rowIndexCache.Clear();
             _pendingBuffer.Clear(); // 설정 초기화 시 버퍼도 비움
 
-            foreach (var cfg in configs)
+            foreach (var tableConfig in tableConfigs)
             {
-                TableNames.Add(cfg.TableName);
+                if (tableConfig == null || string.IsNullOrEmpty(tableConfig.TableName)) continue;
+
+                TableNames.Add(tableConfig.TableName);
+                _subcomponentParentMap[tableConfig.TableName] = tableConfig.TableName;
 
                 // 1. 행 데이터 컬렉션 생성
                 var rows = new System.Collections.ObjectModel.ObservableCollection<System.Dynamic.ExpandoObject>();
@@ -98,34 +121,65 @@ namespace SimulationSpeedTimer
                 // WPF 백그라운드 스레드 업데이트 지원 설정
                 BindingOperations.EnableCollectionSynchronization(rows, _collectionLock);
 
-                _rowCache[cfg.TableName] = rows;
+                _rowCache[tableConfig.TableName] = rows;
+                _rowIndexCache[tableConfig.TableName] = new Dictionary<double, System.Dynamic.ExpandoObject>();
 
                 // 2. 컬럼 구성: Time(고정) + 설정값
-                var cols = new List<GridColumnItem> { new GridColumnItem { FieldName = "Time", HeaderText = "Time" } };
-                if (cfg.Columns != null)
+                var cols = new List<GridColumnItem>
                 {
-                    cols.AddRange(cfg.Columns.Select(c => new GridColumnItem { FieldName = c.FieldName, HeaderText = c.Header }));
+                    new GridColumnItem { FieldName = "Time", HeaderText = "Time" }
+                };
+                var configuredFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (tableConfig.Columns != null)
+                {
+                    foreach (var columnConfig in tableConfig.Columns)
+                    {
+                        if (columnConfig == null || string.IsNullOrEmpty(columnConfig.FieldName)) continue;
+                        if (!configuredFields.Add(columnConfig.FieldName)) continue;
+
+                        cols.Add(new GridColumnItem { FieldName = columnConfig.FieldName, HeaderText = columnConfig.Header });
+                    }
                 }
-                _columnCache[cfg.TableName] = new System.Collections.ObjectModel.ObservableCollection<GridColumnItem>(cols);
+                _columnCache[tableConfig.TableName] = new System.Collections.ObjectModel.ObservableCollection<GridColumnItem>(cols);
+                _configuredFieldCache[tableConfig.TableName] = configuredFields;
+            }
+
+            if (subcomponentLinks != null)
+            {
+                foreach (var link in subcomponentLinks)
+                {
+                    if (link == null ||
+                        string.IsNullOrEmpty(link.SubcomponentTableName) ||
+                        string.IsNullOrEmpty(link.ParentTableName)) continue;
+                    if (!_rowCache.ContainsKey(link.ParentTableName)) continue;
+
+                    _subcomponentParentMap[link.SubcomponentTableName] = link.ParentTableName;
+                }
             }
 
             if (TableNames.Count > 0) SelectedTableName = TableNames[0];
         }
 
-        public void UpdateColumnConfig(string tableName, List<ColumnConfig> newColumns)
+        public void UpdateColumnConfig(string tableName, List<ColumnConfig> columnConfigs)
         {
             if (string.IsNullOrEmpty(tableName) || !_columnCache.TryGetValue(tableName, out var colCollection)) return;
 
             colCollection.Clear();
             colCollection.Add(new GridColumnItem { FieldName = "Time", HeaderText = "Time" });
 
-            if (newColumns != null)
+            var configuredFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (columnConfigs != null)
             {
-                foreach (var c in newColumns)
+                foreach (var columnConfig in columnConfigs)
                 {
-                    colCollection.Add(new GridColumnItem { FieldName = c.FieldName, HeaderText = c.Header });
+                    if (columnConfig == null || string.IsNullOrEmpty(columnConfig.FieldName)) continue;
+                    if (!configuredFields.Add(columnConfig.FieldName)) continue;
+
+                    colCollection.Add(new GridColumnItem { FieldName = columnConfig.FieldName, HeaderText = columnConfig.Header });
                 }
             }
+
+            _configuredFieldCache[tableName] = configuredFields;
         }
 
         private void HandleSessionStarted(Guid sessionId)
@@ -140,6 +194,10 @@ namespace SimulationSpeedTimer
                 while (queue.TryDequeue(out _)) ;
             }
             _pendingBuffer.Clear();
+            foreach (var rowIndex in _rowIndexCache.Values)
+            {
+                rowIndex.Clear();
+            }
 
             // 2. 화면(Grid) 비우기
             foreach (var collection in _rowCache.Values)
@@ -156,50 +214,77 @@ namespace SimulationSpeedTimer
             {
                 while (queue.TryDequeue(out _)) ;
             }
+            foreach (var rowIndex in _rowIndexCache.Values)
+            {
+                rowIndex.Clear();
+            }
             // [잔여 데이터 수신 허용]
             // Stop 버튼을 눌러도 GlobalDataService가 마지막 데이터를 보낼 수 있으므로
             // 여기서 이벤트 핸들러를 해제하지 않습니다. (_currentSessionId는 그대로 유지)
         }
 
         // [안티그래비티 패턴] 백그라운드 데이터 버퍼 & UI 갱신 타이머
-        private readonly ConcurrentDictionary<string, ConcurrentQueue<System.Dynamic.ExpandoObject>> _pendingBuffer = new ConcurrentDictionary<string, ConcurrentQueue<System.Dynamic.ExpandoObject>>();
+        private readonly ConcurrentDictionary<string, ConcurrentQueue<RowPatch>> _pendingBuffer = new ConcurrentDictionary<string, ConcurrentQueue<RowPatch>>();
         private readonly DispatcherTimer _uiRefreshTimer;
 
 
 
         private void HandleFramesAdded(List<SimulationFrame> frames, Guid sessionId)
         {
-            if (_currentSessionId != sessionId) return;
+            if (_currentSessionId != sessionId || frames == null || frames.Count == 0) return;
 
             // [Step 1: Background Thread] Non-blocking Output
-            // UI 스레드를 괴롭히지 않고, 데이터를 메모리 큐에 적재만 합니다.
+            // 같은 frame 안의 물리 테이블들을 논리 테이블 기준 patch로 합쳐서 큐에 적재합니다.
             foreach (var frame in frames)
             {
-                // 현재 관리 중인 테이블에 대해서만 처리
-                foreach (var tableName in _rowCache.Keys)
-                {
-                    var tableData = frame.GetTable(tableName);
-                    if (tableData != null)
-                    {
-                        var row = CreateExpandoRow(frame, tableData);
+                var rowPatchCache = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
 
-                        // 큐에 안전하게 투입 (Lock-free)
-                        var queue = _pendingBuffer.GetOrAdd(tableName, _ => new ConcurrentQueue<System.Dynamic.ExpandoObject>());
-                        queue.Enqueue(row);
+                foreach (var tableData in frame.AllTables)
+                {
+                    if (!_subcomponentParentMap.TryGetValue(tableData.TableName, out var parentTableName)) continue;
+                    if (!_configuredFieldCache.TryGetValue(parentTableName, out var configuredFields)) continue;
+
+                    if (!rowPatchCache.TryGetValue(parentTableName, out var fieldValues))
+                    {
+                        fieldValues = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                        rowPatchCache[parentTableName] = fieldValues;
                     }
+
+                    foreach (var colName in tableData.ColumnNames)
+                    {
+                        if (!configuredFields.Contains(colName)) continue;
+
+                        var value = tableData[colName];
+                        if (value != null)
+                        {
+                            fieldValues[colName] = value;
+                        }
+                    }
+                }
+
+                foreach (var patch in rowPatchCache)
+                {
+                    if (patch.Value.Count == 0) continue;
+
+                    var queue = _pendingBuffer.GetOrAdd(patch.Key, _ => new ConcurrentQueue<RowPatch>());
+                    queue.Enqueue(new RowPatch
+                    {
+                        Time = frame.Time,
+                        FieldValues = patch.Value
+                    });
                 }
             }
         }
 
-        private System.Dynamic.ExpandoObject CreateExpandoRow(SimulationFrame frame, SimulationTable tableData)
+        private System.Dynamic.ExpandoObject CreateExpandoRow(double time, IDictionary<string, object> fieldValues)
         {
             var row = new System.Dynamic.ExpandoObject();
             var dict = (IDictionary<string, object>)row;
 
-            dict["Time"] = frame.Time;
-            foreach (var colName in tableData.ColumnNames)
+            dict["Time"] = time;
+            foreach (var pair in fieldValues)
             {
-                dict[colName] = tableData[colName];
+                dict[pair.Key] = pair.Value;
             }
             return row;
         }
@@ -216,13 +301,23 @@ namespace SimulationSpeedTimer
 
                 if (_rowCache.TryGetValue(kvp.Key, out var targetCollection))
                 {
-                    // [Batch Add] 
-                    // 한 번의 타이머 틱 동안 쌓인 모든 데이터를 해당 컬렉션에 털어넣습니다.
-                    // UI 스레드에서 직접 수행되므로 별도의 잠금 없이도 안전하지만, 
-                    // BindingOperations.EnableCollectionSynchronization을 사용 중이라면 내부적으로 잠금이 걸릴 수 있습니다.
-                    while (kvp.Value.TryDequeue(out var item))
+                    var rowIndex = _rowIndexCache[kvp.Key];
+
+                    while (kvp.Value.TryDequeue(out var patch))
                     {
-                        targetCollection.Add(item);
+                        if (!rowIndex.TryGetValue(patch.Time, out var row))
+                        {
+                            row = CreateExpandoRow(patch.Time, patch.FieldValues);
+                            rowIndex[patch.Time] = row;
+                            targetCollection.Add(row);
+                            continue;
+                        }
+
+                        var dict = (IDictionary<string, object>)row;
+                        foreach (var pair in patch.FieldValues)
+                        {
+                            dict[pair.Key] = pair.Value;
+                        }
                     }
                 }
             }
@@ -242,6 +337,12 @@ namespace SimulationSpeedTimer
             storage = value;
             OnPropertyChanged(propertyName);
             return true;
+        }
+
+        private sealed class RowPatch
+        {
+            public double Time { get; set; }
+            public Dictionary<string, object> FieldValues { get; set; }
         }
     }
 
@@ -270,5 +371,11 @@ namespace SimulationSpeedTimer
     {
         public string FieldName { get; set; }  // DB 컬럼명 (데이터 매핑용)
         public string Header { get; set; }     // UI 헤더 표시용
+    }
+
+    public class SubcomponentLink
+    {
+        public string SubcomponentTableName { get; set; }
+        public string ParentTableName { get; set; }
     }
 }
