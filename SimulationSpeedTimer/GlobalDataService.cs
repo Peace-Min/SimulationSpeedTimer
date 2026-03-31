@@ -417,6 +417,9 @@ namespace SimulationSpeedTimer
 
             private SimulationSchema WaitForSchemaReady(SQLiteConnection conn, CancellationToken token)
             {
+                int stableCount = 0;
+                int? lastSchemaVersion = null;
+
                 while (!token.IsCancellationRequested)
                 {
                     try
@@ -439,17 +442,51 @@ namespace SimulationSpeedTimer
                             FilterSchemaByConfig(schema);
                             if (!ValidateFilteredTablesReady(conn, schema))
                             {
+                                stableCount = 0;
+                                lastSchemaVersion = null;
                                 token.WaitHandle.WaitOne(1000);
                                 continue;
                             }
 
                             // 4. 깔끔하게 정리된 스키마를 저장 후 반환
+                            var currentSchemaVersion = GetSchemaVersion(conn);
+                            if (!currentSchemaVersion.HasValue)
+                            {
+                                stableCount = 0;
+                                lastSchemaVersion = null;
+                                token.WaitHandle.WaitOne(1000);
+                                continue;
+                            }
+
+                            if (lastSchemaVersion.HasValue && lastSchemaVersion.Value == currentSchemaVersion.Value)
+                            {
+                                stableCount++;
+                            }
+                            else
+                            {
+                                stableCount = 1;
+                                lastSchemaVersion = currentSchemaVersion.Value;
+                            }
+
+                            if (stableCount < 2)
+                            {
+                                token.WaitHandle.WaitOne(300);
+                                continue;
+                            }
+
                             SharedFrameRepository.Instance.Schema = schema;
                             return schema;
                         }
+                        stableCount = 0;
+                        lastSchemaVersion = null;
                         token.WaitHandle.WaitOne(1000);
                     }
-                    catch { token.WaitHandle.WaitOne(1000); }
+                    catch
+                    {
+                        stableCount = 0;
+                        lastSchemaVersion = null;
+                        token.WaitHandle.WaitOne(1000);
+                    }
                 }
                 return null;
             }
@@ -566,6 +603,33 @@ namespace SimulationSpeedTimer
                 catch
                 {
                     return false;
+                }
+            }
+
+            private int? GetSchemaVersion(SQLiteConnection conn)
+            {
+                if (conn == null)
+                {
+                    return null;
+                }
+
+                try
+                {
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = "PRAGMA schema_version;";
+                        var result = cmd.ExecuteScalar();
+                        if (result == null)
+                        {
+                            return null;
+                        }
+
+                        return Convert.ToInt32(result);
+                    }
+                }
+                catch
+                {
+                    return null;
                 }
             }
 
