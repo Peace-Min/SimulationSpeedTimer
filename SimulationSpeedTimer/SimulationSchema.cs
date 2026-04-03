@@ -48,6 +48,21 @@ namespace SimulationSpeedTimer
         }
 
         /// <summary>
+        /// 물리적 테이블 이름으로 스키마에서 테이블 제거 (불필요한 테이블 로드 방지)
+        /// </summary>
+        public void RemoveTable(string tableName)
+        {
+            if (_tables.TryGetValue(tableName, out var table))
+            {
+                _tables.Remove(tableName);
+                if (!string.IsNullOrEmpty(table.ObjectName))
+                {
+                    _tablesByObject.Remove(table.ObjectName);
+                }
+            }
+        }
+
+        /// <summary>
         /// 논리적 객체 이름으로 스키마 조회 (Controller 설정 연동용)
         /// 예: "ourDetectRadar" -> Object_Table_0 정보 반환
         /// </summary>

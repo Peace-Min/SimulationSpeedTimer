@@ -557,7 +557,10 @@ namespace SimulationSpeedTimer
             {
                 if (_config.ExpectedColumns == null || _config.ExpectedColumns.Count == 0) return;
 
-                foreach (var table in schema.Tables)
+                // 스키마 컬렉션이 루프 도중 변경(삭제)될 수 있으므로 ToList()를 통해 복제된 리스트로 순회합니다.
+                var currentTables = schema.Tables.ToList();
+
+                foreach (var table in currentTables)
                 {
                     if (_config.ExpectedColumns.TryGetValue(table.ObjectName, out var targetColumns))
                     {
@@ -572,6 +575,12 @@ namespace SimulationSpeedTimer
 
                         // 3. 필터링된 컬럼으로 기존 스키마 덮어쓰기
                         table.SetFilteredColumns(filteredColumns);
+                    }
+                    else
+                    {
+                        // Config에 명시되지 않은 테이블의 경우, 스키마 목록에서 자체를 제거하여
+                        // 불필요한 메타데이터 유지 및 데이터 로드를 원천적으로 차단합니다.
+                        schema.RemoveTable(table.TableName);
                     }
                 }
             }
