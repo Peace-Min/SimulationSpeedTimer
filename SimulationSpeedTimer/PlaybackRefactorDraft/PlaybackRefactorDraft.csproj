@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <None Include="UserCustomChart_2DGraph.PlaybackRefactor.cs" />
+    <None Include="UserCustomChart_2DSubplotGraph.PlaybackRefactor.cs" />
+    <None Include="UserCustomChart_3DGraph.PlaybackRefactor.cs" />
     <None Include="README.md" />
   </ItemGroup>
 </Project>
