@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <title>Schema Validation Report Example</title>
+    <style>
+        body
+        {
+            margin: 24px;
+            background: #f4f6f8;
+            color: #1f2933;
+            font-family: "Segoe UI", sans-serif;
+        }
+
+        h1,
+        h2
+        {
+            margin: 0 0 12px 0;
+        }
+
+        .page
+        {
+            max-width: 1280px;
+            margin: 0 auto;
+        }
+
+        .card
+        {
+            margin-bottom: 18px;
+            padding: 18px;
+            background: #ffffff;
+            border: 1px solid #d8dee4;
+            border-radius: 12px;
+            box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+        }
+
+        .summary-grid
+        {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(180px, 1fr));
+            gap: 12px;
+        }
+
+        .metric
+        {
+            padding: 12px 14px;
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+        }
+
+        .metric-label
+        {
+            margin-bottom: 6px;
+            font-size: 12px;
+            color: #52606d;
+        }
+
+        .metric-value
+        {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .status-pass
+        {
+            color: #18794e;
+        }
+
+        .status-fail
+        {
+            color: #c81e1e;
+        }
+
+        .status-warn
+        {
+            color: #b45309;
+        }
+
+        table
+        {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td
+        {
+            padding: 10px 12px;
+            border: 1px solid #d8dee4;
+            text-align: left;
+            vertical-align: top;
+            font-size: 14px;
+        }
+
+        th
+        {
+            background: #eef2f6;
+            font-weight: 700;
+        }
+
+        code
+        {
+            padding: 2px 6px;
+            background: #eef2f6;
+            border-radius: 6px;
+            font-family: Consolas, monospace;
+            font-size: 13px;
+        }
+
+        .chip
+        {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .chip-pass
+        {
+            color: #18794e;
+            background: #e7f6ec;
+        }
+
+        .chip-fail
+        {
+            color: #c81e1e;
+            background: #fdecec;
+        }
+
+        .chip-warn
+        {
+            color: #b45309;
+            background: #fff3e6;
+        }
+
+        details
+        {
+            margin-top: 10px;
+            padding: 12px 14px;
+            background: #fbfcfd;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+        }
+
+        summary
+        {
+            cursor: pointer;
+            font-weight: 700;
+        }
+
+        .detail-grid
+        {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .detail-box
+        {
+            padding: 12px;
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+        }
+
+        ul
+        {
+            margin: 8px 0 0 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="card">
+            <h1>Schema Validation Report</h1>
+            <div class="summary-grid">
+                <div class="metric">
+                    <div class="metric-label">Validation Result</div>
+                    <div class="metric-value status-fail">FAIL</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Session Id</div>
+                    <div class="metric-value">2f1d-8ab3-ff09</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">DB Path</div>
+                    <div class="metric-value">sample_run_01.db</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Validated At</div>
+                    <div class="metric-value">2026-04-28 17:05:12</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Configured Objects</div>
+                    <div class="metric-value">3</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Configured Attributes</div>
+                    <div class="metric-value">8</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Matched Objects</div>
+                    <div class="metric-value">2</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Missing Attributes</div>
+                    <div class="metric-value">2</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Config Snapshot</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Object Name</th>
+                        <th>Required Attributes</th>
+                        <th>Count</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>PlayerA</td>
+                        <td>PositionX, PositionY, Speed</td>
+                        <td>3</td>
+                    </tr>
+                    <tr>
+                        <td>PlayerB</td>
+                        <td>Heading, Speed</td>
+                        <td>2</td>
+                    </tr>
+                    <tr>
+                        <td>PlayerC</td>
+                        <td>Heading, Altitude, Fuel</td>
+                        <td>3</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>DB Snapshot</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Object Name</th>
+                        <th>Table Name</th>
+                        <th>Attributes</th>
+                        <th>Count</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>PlayerA</td>
+                        <td><code>Object_Table_0</code></td>
+                        <td>PositionX, PositionY, Speed, DebugField</td>
+                        <td>4</td>
+                    </tr>
+                    <tr>
+                        <td>PlayerC</td>
+                        <td><code>Object_Table_7</code></td>
+                        <td>Heading, Fuel, TempValue</td>
+                        <td>3</td>
+                    </tr>
+                    <tr>
+                        <td>ExtraProbe</td>
+                        <td><code>Object_Table_9</code></td>
+                        <td>RawX, RawY</td>
+                        <td>2</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Comparison</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Object</th>
+                        <th>Object Mapping</th>
+                        <th>DB Table</th>
+                        <th>Column Mapping</th>
+                        <th>Missing In DB</th>
+                        <th>Extra In DB</th>
+                        <th>Result</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>PlayerA</td>
+                        <td><span class="chip chip-pass">PASS</span></td>
+                        <td><code>Object_Table_0</code></td>
+                        <td><span class="chip chip-pass">PASS</span></td>
+                        <td>-</td>
+                        <td>DebugField</td>
+                        <td><span class="chip chip-pass">PASS</span></td>
+                    </tr>
+                    <tr>
+                        <td>PlayerB</td>
+                        <td><span class="chip chip-fail">FAIL</span></td>
+                        <td>-</td>
+                        <td><span class="chip chip-warn">SKIPPED</span></td>
+                        <td>Heading, Speed</td>
+                        <td>-</td>
+                        <td><span class="chip chip-fail">FAIL</span></td>
+                    </tr>
+                    <tr>
+                        <td>PlayerC</td>
+                        <td><span class="chip chip-pass">PASS</span></td>
+                        <td><code>Object_Table_7</code></td>
+                        <td><span class="chip chip-fail">FAIL</span></td>
+                        <td>Altitude</td>
+                        <td>TempValue</td>
+                        <td><span class="chip chip-fail">FAIL</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Details</h2>
+
+            <details open>
+                <summary>PlayerA</summary>
+                <div class="detail-grid">
+                    <div class="detail-box">
+                        <strong>Config</strong>
+                        <ul>
+                            <li>Object Name: PlayerA</li>
+                            <li>Required Attributes: PositionX, PositionY, Speed</li>
+                        </ul>
+                    </div>
+                    <div class="detail-box">
+                        <strong>DB</strong>
+                        <ul>
+                            <li>Object Name: PlayerA</li>
+                            <li>Table Name: <code>Object_Table_0</code></li>
+                            <li>Attributes: PositionX, PositionY, Speed, DebugField</li>
+                        </ul>
+                    </div>
+                </div>
+            </details>
+
+            <details>
+                <summary>PlayerB</summary>
+                <div class="detail-grid">
+                    <div class="detail-box">
+                        <strong>Config</strong>
+                        <ul>
+                            <li>Object Name: PlayerB</li>
+                            <li>Required Attributes: Heading, Speed</li>
+                        </ul>
+                    </div>
+                    <div class="detail-box">
+                        <strong>DB</strong>
+                        <ul>
+                            <li>Object Mapping: Not Found</li>
+                            <li>Table Name: -</li>
+                            <li>Attributes: -</li>
+                        </ul>
+                    </div>
+                </div>
+            </details>
+
+            <details>
+                <summary>PlayerC</summary>
+                <div class="detail-grid">
+                    <div class="detail-box">
+                        <strong>Config</strong>
+                        <ul>
+                            <li>Object Name: PlayerC</li>
+                            <li>Required Attributes: Heading, Altitude, Fuel</li>
+                        </ul>
+                    </div>
+                    <div class="detail-box">
+                        <strong>DB</strong>
+                        <ul>
+                            <li>Object Name: PlayerC</li>
+                            <li>Table Name: <code>Object_Table_7</code></li>
+                            <li>Attributes: Heading, Fuel, TempValue</li>
+                        </ul>
+                    </div>
+                </div>
+            </details>
+        </div>
+    </div>
+</body>
+</html>

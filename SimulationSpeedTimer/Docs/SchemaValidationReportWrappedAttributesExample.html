@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <title>Schema Validation Report Wrapped Attributes Example</title>
+    <style>
+        body
+        {
+            margin: 20px;
+            font-family: "Segoe UI", sans-serif;
+            color: #222222;
+            background: #ffffff;
+        }
+
+        h1,
+        h2
+        {
+            margin-bottom: 8px;
+        }
+
+        .meta
+        {
+            margin-bottom: 20px;
+            line-height: 1.7;
+        }
+
+        table
+        {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 24px;
+            table-layout: fixed;
+        }
+
+        th,
+        td
+        {
+            border: 1px solid #cccccc;
+            padding: 8px 10px;
+            text-align: left;
+            vertical-align: top;
+            font-size: 14px;
+        }
+
+        th
+        {
+            background: #f3f3f3;
+        }
+
+        .pass
+        {
+            color: #157f3b;
+            font-weight: 700;
+        }
+
+        .fail
+        {
+            color: #c62828;
+            font-weight: 700;
+        }
+
+        code
+        {
+            background: #f3f3f3;
+            padding: 1px 4px;
+            border-radius: 4px;
+        }
+
+        .attributes
+        {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .attr
+        {
+            display: inline-block;
+            max-width: 100%;
+            padding: 3px 8px;
+            border: 1px solid #d7d7d7;
+            border-radius: 999px;
+            background: #f7f7f7;
+            font-size: 12px;
+            line-height: 1.4;
+            word-break: break-word;
+        }
+
+        .attr-missing
+        {
+            color: #c62828;
+            border-color: #efb0b0;
+            background: #fff2f2;
+        }
+
+        .attr-extra
+        {
+            color: #8a5700;
+            border-color: #f0d3a2;
+            background: #fff8eb;
+        }
+
+        .muted
+        {
+            color: #666666;
+        }
+    </style>
+</head>
+<body>
+    <h1>Schema Validation Report</h1>
+
+    <div class="meta">
+        <div><strong>Time:</strong> 2026-04-28 17:42:10</div>
+        <div><strong>Session:</strong> 4ac2-1d90-cf22</div>
+        <div><strong>DB:</strong> C:\Logs\sample_run_02.db</div>
+        <div><strong>Result:</strong> <span class="fail">FAIL</span></div>
+    </div>
+
+    <h2>Configured Object Comparison</h2>
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 12%;">ObjectName</th>
+                <th style="width: 12%;">TableName</th>
+                <th style="width: 26%;">Required Attributes</th>
+                <th style="width: 26%;">DB Attributes</th>
+                <th style="width: 16%;">Missing Attributes</th>
+                <th style="width: 8%;">Result</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>PlayerA</td>
+                <td><code>Object_Table_0</code></td>
+                <td>
+                    <div class="attributes">
+                        <span class="attr">PositionX</span>
+                        <span class="attr">PositionY</span>
+                        <span class="attr">Speed</span>
+                        <span class="attr">Acceleration</span>
+                        <span class="attr">Heading</span>
+                        <span class="attr">Altitude</span>
+                        <span class="attr">YawRate</span>
+                        <span class="attr">PitchRate</span>
+                    </div>
+                </td>
+                <td>
+                    <div class="attributes">
+                        <span class="attr">PositionX</span>
+                        <span class="attr">PositionY</span>
+                        <span class="attr">Speed</span>
+                        <span class="attr">Acceleration</span>
+                        <span class="attr">Heading</span>
+                        <span class="attr">Altitude</span>
+                        <span class="attr">YawRate</span>
+                        <span class="attr">PitchRate</span>
+                    </div>
+                </td>
+                <td><span class="muted">-</span></td>
+                <td><span class="pass">PASS</span></td>
+            </tr>
+            <tr>
+                <td>PlayerB</td>
+                <td><code>Object_Table_3</code></td>
+                <td>
+                    <div class="attributes">
+                        <span class="attr">Heading</span>
+                        <span class="attr">Speed</span>
+                        <span class="attr">TrackQuality</span>
+                        <span class="attr">IFFModeCode</span>
+                        <span class="attr">ThreatEvaluationScore</span>
+                        <span class="attr">SensorFusionConfidence</span>
+                    </div>
+                </td>
+                <td>
+                    <div class="attributes">
+                        <span class="attr">Heading</span>
+                        <span class="attr">Speed</span>
+                        <span class="attr">TrackQuality</span>
+                        <span class="attr attr-extra">DebugState</span>
+                    </div>
+                </td>
+                <td>
+                    <div class="attributes">
+                        <span class="attr attr-missing">IFFModeCode</span>
+                        <span class="attr attr-missing">ThreatEvaluationScore</span>
+                        <span class="attr attr-missing">SensorFusionConfidence</span>
+                    </div>
+                </td>
+                <td><span class="fail">FAIL</span></td>
+            </tr>
+            <tr>
+                <td>PlayerC</td>
+                <td>-</td>
+                <td>
+                    <div class="attributes">
+                        <span class="attr">Fuel</span>
+                        <span class="attr">Heading</span>
+                        <span class="attr">Altitude</span>
+                        <span class="attr">TargetClassification</span>
+                        <span class="attr">TargetPriority</span>
+                    </div>
+                </td>
+                <td><span class="muted">Object mapping not found</span></td>
+                <td>
+                    <div class="attributes">
+                        <span class="attr attr-missing">Fuel</span>
+                        <span class="attr attr-missing">Heading</span>
+                        <span class="attr attr-missing">Altitude</span>
+                        <span class="attr attr-missing">TargetClassification</span>
+                        <span class="attr attr-missing">TargetPriority</span>
+                    </div>
+                </td>
+                <td><span class="fail">FAIL</span></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>DB Raw Objects</h2>
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 18%;">DB ObjectName</th>
+                <th style="width: 18%;">TableName</th>
+                <th style="width: 64%;">Attributes</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>PlayerA</td>
+                <td><code>Object_Table_0</code></td>
+                <td>
+                    <div class="attributes">
+                        <span class="attr">PositionX</span>
+                        <span class="attr">PositionY</span>
+                        <span class="attr">Speed</span>
+                        <span class="attr">Acceleration</span>
+                        <span class="attr">Heading</span>
+                        <span class="attr">Altitude</span>
+                        <span class="attr">YawRate</span>
+                        <span class="attr">PitchRate</span>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td>PlayerB</td>
+                <td><code>Object_Table_3</code></td>
+                <td>
+                    <div class="attributes">
+                        <span class="attr">Heading</span>
+                        <span class="attr">Speed</span>
+                        <span class="attr">TrackQuality</span>
+                        <span class="attr">DebugState</span>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td>PlyaerC</td>
+                <td><code>Object_Table_7</code></td>
+                <td>
+                    <div class="attributes">
+                        <span class="attr">Fuel</span>
+                        <span class="attr">Heading</span>
+                        <span class="attr">Altitude</span>
+                        <span class="attr">TargetClassification</span>
+                        <span class="attr">TargetPriority</span>
+                        <span class="attr">InternalDebugCounter</span>
+                    </div>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</body>
+</html>

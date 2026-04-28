@@ -106,6 +106,7 @@ namespace SimulationSpeedTimer
             private Dictionary<string, double> _tableCursors = new Dictionary<string, double>();
 
             private volatile Action _completionCallback;
+            private readonly SchemaValidationReportService _schemaValidationReportService = new SchemaValidationReportService();
 
             public event Action<Dictionary<double, SimulationFrame>> OnChunkProcessed;
 
@@ -417,13 +418,21 @@ namespace SimulationSpeedTimer
 
             private SimulationSchema WaitForSchemaReady(SQLiteConnection conn, CancellationToken token)
             {
+                int retryCnt = 0;
                 int stableCount = 0;
                 int? lastSchemaVersion = null;
+                SimulationSchema lastLoadedSchema = null;
 
                 while (!token.IsCancellationRequested)
                 {
                     try
                     {
+                        if (retryCnt > 10)
+                        {
+                            TryWriteSchemaValidationReport(lastLoadedSchema, false);
+                            return null;
+                        }
+
                         using (var cmd = conn.CreateCommand())
                         {
                             cmd.CommandText = "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='Object_Info'";
@@ -436,12 +445,20 @@ namespace SimulationSpeedTimer
                         }
 
                         var schema = LoadSchemaFailedSafe(conn);
+                        if (schema != null)
+                        {
+                            lastLoadedSchema = schema;
+                        }
+
                         if (schema != null && ValidateSchema(schema))
                         {
+                            var reportSourceSchema = LoadSchemaFailedSafe(conn) ?? schema;
+
                             // 3. 검증 성공 시! -> 불필요한 컬럼 가지치기(필터링) 수행
                             FilterSchemaByConfig(schema);
                             if (!ValidateFilteredTablesReady(conn, schema))
                             {
+                                retryCnt++;
                                 stableCount = 0;
                                 lastSchemaVersion = null;
                                 token.WaitHandle.WaitOne(1000);
@@ -452,6 +469,7 @@ namespace SimulationSpeedTimer
                             var currentSchemaVersion = GetSchemaVersion(conn);
                             if (!currentSchemaVersion.HasValue)
                             {
+                                retryCnt++;
                                 stableCount = 0;
                                 lastSchemaVersion = null;
                                 token.WaitHandle.WaitOne(1000);
@@ -474,21 +492,43 @@ namespace SimulationSpeedTimer
                                 continue;
                             }
 
+                            TryWriteSchemaValidationReport(reportSourceSchema, true);
                             SharedFrameRepository.Instance.Schema = schema;
                             return schema;
                         }
+
+                        retryCnt++;
                         stableCount = 0;
                         lastSchemaVersion = null;
                         token.WaitHandle.WaitOne(1000);
                     }
                     catch
                     {
+                        retryCnt++;
                         stableCount = 0;
                         lastSchemaVersion = null;
                         token.WaitHandle.WaitOne(1000);
                     }
                 }
                 return null;
+            }
+
+            private void TryWriteSchemaValidationReport(SimulationSchema schema, bool isSuccess)
+            {
+                try
+                {
+                    var snapshot = SchemaValidationReportMapper.Map(
+                        _config.DbPath,
+                        _config.ExpectedColumns,
+                        schema,
+                        isSuccess);
+
+                    _schemaValidationReportService.TryWrite(snapshot, out _);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[SchemaValidationReport] Failed to build report snapshot: {ex.Message}");
+                }
             }
 
             private SimulationSchema LoadSchemaFailedSafe(SQLiteConnection conn)

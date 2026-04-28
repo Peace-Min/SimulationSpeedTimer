@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <title>Validation Comparison Report Mockup</title>
+    <style>
+        body
+        {
+            margin: 24px;
+            font-family: "Segoe UI", sans-serif;
+            color: #222222;
+            background: #ffffff;
+        }
+
+        h1,
+        h2
+        {
+            margin-bottom: 8px;
+        }
+
+        .meta
+        {
+            margin-bottom: 18px;
+            line-height: 1.7;
+        }
+
+        .note
+        {
+            margin-bottom: 20px;
+            padding: 12px 14px;
+            border: 1px solid #d9d9d9;
+            background: #fafafa;
+            color: #444444;
+            font-size: 14px;
+        }
+
+        table
+        {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 24px;
+            table-layout: fixed;
+        }
+
+        th,
+        td
+        {
+            border: 1px solid #cccccc;
+            padding: 9px 10px;
+            text-align: left;
+            vertical-align: top;
+            font-size: 14px;
+        }
+
+        th
+        {
+            background: #f3f3f3;
+        }
+
+        .status-ok
+        {
+            color: #157f3b;
+            font-weight: 700;
+        }
+
+        .status-ng
+        {
+            color: #c62828;
+            font-weight: 700;
+        }
+
+        .status-warn
+        {
+            color: #9a6700;
+            font-weight: 700;
+        }
+
+        .tokens
+        {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .token
+        {
+            display: inline-block;
+            max-width: 100%;
+            padding: 3px 8px;
+            border: 1px solid #d6d6d6;
+            border-radius: 999px;
+            background: #f7f7f7;
+            font-size: 12px;
+            line-height: 1.4;
+            word-break: break-word;
+        }
+
+        .token-missing
+        {
+            color: #c62828;
+            border-color: #efb0b0;
+            background: #fff2f2;
+        }
+
+        .token-extra
+        {
+            color: #8a5700;
+            border-color: #f0d3a2;
+            background: #fff8eb;
+        }
+
+        .muted
+        {
+            color: #666666;
+        }
+    </style>
+</head>
+<body>
+    <h1>Validation Comparison Report</h1>
+
+    <div class="meta">
+        <div><strong>Generated At:</strong> 2026-04-28 18:02:14</div>
+        <div><strong>Source:</strong> sample_input_A</div>
+        <div><strong>Result:</strong> <span class="status-ng">CHECK REQUIRED</span></div>
+    </div>
+
+    <div class="note">
+        This is a mockup example for report-style comparison output.
+        The goal is to present differences in a readable document format instead of exposing raw internal data dumps.
+    </div>
+
+    <h2>Comparison Summary</h2>
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 15%;">Comparison Target</th>
+                <th style="width: 13%;">Resolved Source</th>
+                <th style="width: 24%;">Expected Items</th>
+                <th style="width: 24%;">Actual Items</th>
+                <th style="width: 16%;">Difference</th>
+                <th style="width: 8%;">Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Group A</td>
+                <td>Source_01</td>
+                <td>
+                    <div class="tokens">
+                        <span class="token">PositionX</span>
+                        <span class="token">PositionY</span>
+                        <span class="token">Speed</span>
+                        <span class="token">Heading</span>
+                        <span class="token">Altitude</span>
+                    </div>
+                </td>
+                <td>
+                    <div class="tokens">
+                        <span class="token">PositionX</span>
+                        <span class="token">PositionY</span>
+                        <span class="token">Speed</span>
+                        <span class="token">Heading</span>
+                        <span class="token">Altitude</span>
+                    </div>
+                </td>
+                <td><span class="muted">-</span></td>
+                <td><span class="status-ok">OK</span></td>
+            </tr>
+            <tr>
+                <td>Group B</td>
+                <td>Source_03</td>
+                <td>
+                    <div class="tokens">
+                        <span class="token">TrackId</span>
+                        <span class="token">Confidence</span>
+                        <span class="token">Priority</span>
+                        <span class="token">ThreatScore</span>
+                        <span class="token">FusionState</span>
+                    </div>
+                </td>
+                <td>
+                    <div class="tokens">
+                        <span class="token">TrackId</span>
+                        <span class="token">Confidence</span>
+                        <span class="token">Priority</span>
+                        <span class="token token-extra">DebugState</span>
+                    </div>
+                </td>
+                <td>
+                    <div class="tokens">
+                        <span class="token token-missing">ThreatScore</span>
+                        <span class="token token-missing">FusionState</span>
+                        <span class="token token-extra">DebugState</span>
+                    </div>
+                </td>
+                <td><span class="status-ng">DIFF</span></td>
+            </tr>
+            <tr>
+                <td>Group C</td>
+                <td><span class="muted">Not Resolved</span></td>
+                <td>
+                    <div class="tokens">
+                        <span class="token">ModeCode</span>
+                        <span class="token">Classification</span>
+                        <span class="token">Range</span>
+                    </div>
+                </td>
+                <td><span class="muted">No matching source</span></td>
+                <td>
+                    <div class="tokens">
+                        <span class="token token-missing">ModeCode</span>
+                        <span class="token token-missing">Classification</span>
+                        <span class="token token-missing">Range</span>
+                    </div>
+                </td>
+                <td><span class="status-warn">UNRESOLVED</span></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>Observed Source List</h2>
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 22%;">Observed Name</th>
+                <th style="width: 18%;">Resolved Source</th>
+                <th style="width: 60%;">Observed Items</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Group A</td>
+                <td>Source_01</td>
+                <td>
+                    <div class="tokens">
+                        <span class="token">PositionX</span>
+                        <span class="token">PositionY</span>
+                        <span class="token">Speed</span>
+                        <span class="token">Heading</span>
+                        <span class="token">Altitude</span>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td>Group B</td>
+                <td>Source_03</td>
+                <td>
+                    <div class="tokens">
+                        <span class="token">TrackId</span>
+                        <span class="token">Confidence</span>
+                        <span class="token">Priority</span>
+                        <span class="token">DebugState</span>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td>Gr0up C</td>
+                <td>Source_07</td>
+                <td>
+                    <div class="tokens">
+                        <span class="token">ModeCode</span>
+                        <span class="token">Classification</span>
+                        <span class="token">Range</span>
+                        <span class="token">ReservedField</span>
+                    </div>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</body>
+</html>

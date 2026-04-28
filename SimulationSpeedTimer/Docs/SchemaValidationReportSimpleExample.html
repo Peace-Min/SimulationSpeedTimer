@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <title>Schema Validation Report Simple Example</title>
+    <style>
+        body
+        {
+            margin: 20px;
+            font-family: "Segoe UI", sans-serif;
+            color: #222222;
+            background: #ffffff;
+        }
+
+        h1,
+        h2
+        {
+            margin-bottom: 8px;
+        }
+
+        .meta
+        {
+            margin-bottom: 20px;
+            line-height: 1.7;
+        }
+
+        table
+        {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 24px;
+        }
+
+        th,
+        td
+        {
+            border: 1px solid #cccccc;
+            padding: 8px 10px;
+            text-align: left;
+            vertical-align: top;
+            font-size: 14px;
+        }
+
+        th
+        {
+            background: #f3f3f3;
+        }
+
+        .pass
+        {
+            color: #157f3b;
+            font-weight: 700;
+        }
+
+        .fail
+        {
+            color: #c62828;
+            font-weight: 700;
+        }
+
+        code
+        {
+            background: #f3f3f3;
+            padding: 1px 4px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Schema Validation Report</h1>
+
+    <div class="meta">
+        <div><strong>Time:</strong> 2026-04-28 17:20:15</div>
+        <div><strong>Session:</strong> 2f1d-8ab3-ff09</div>
+        <div><strong>DB:</strong> C:\Logs\sample_run_01.db</div>
+        <div><strong>Result:</strong> <span class="fail">FAIL</span></div>
+    </div>
+
+    <h2>Configured Object Comparison</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>ObjectName</th>
+                <th>TableName</th>
+                <th>Required Attributes</th>
+                <th>DB Attributes</th>
+                <th>Missing Attributes</th>
+                <th>Result</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>PlayerA</td>
+                <td><code>Object_Table_0</code></td>
+                <td>PositionX, PositionY, Speed</td>
+                <td>PositionX, PositionY, Speed</td>
+                <td>-</td>
+                <td><span class="pass">PASS</span></td>
+            </tr>
+            <tr>
+                <td>PlayerB</td>
+                <td>-</td>
+                <td>Heading, Speed</td>
+                <td>-</td>
+                <td>Heading, Speed</td>
+                <td><span class="fail">FAIL</span></td>
+            </tr>
+            <tr>
+                <td>PlayerC</td>
+                <td><code>Object_Table_7</code></td>
+                <td>Heading, Altitude, Fuel</td>
+                <td>Heading, Fuel, TempValue</td>
+                <td>Altitude</td>
+                <td><span class="fail">FAIL</span></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>DB Raw Objects</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>DB ObjectName</th>
+                <th>TableName</th>
+                <th>Attributes</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>PlayerA</td>
+                <td><code>Object_Table_0</code></td>
+                <td>PositionX, PositionY, Speed</td>
+            </tr>
+            <tr>
+                <td>PlyaerB</td>
+                <td><code>Object_Table_3</code></td>
+                <td>Heading, Speed</td>
+            </tr>
+            <tr>
+                <td>PlayerC</td>
+                <td><code>Object_Table_7</code></td>
+                <td>Heading, Fuel, TempValue</td>
+            </tr>
+            <tr>
+                <td>ExtraProbe</td>
+                <td><code>Object_Table_9</code></td>
+                <td>RawX, RawY</td>
+            </tr>
+        </tbody>
+    </table>
+</body>
+</html>
