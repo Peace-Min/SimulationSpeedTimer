@@ -106,7 +106,7 @@ namespace SimulationSpeedTimer
             private Dictionary<string, double> _tableCursors = new Dictionary<string, double>();
 
             private volatile Action _completionCallback;
-            private readonly SchemaValidationReportService _schemaValidationReportService = new SchemaValidationReportService();
+            private readonly IComparisonExportService _comparisonExportService = new ComparisonExportService();
 
             public event Action<Dictionary<double, SimulationFrame>> OnChunkProcessed;
 
@@ -452,8 +452,6 @@ namespace SimulationSpeedTimer
 
                         if (schema != null && ValidateSchema(schema))
                         {
-                            var reportSourceSchema = LoadSchemaFailedSafe(conn) ?? schema;
-
                             // 3. 검증 성공 시! -> 불필요한 컬럼 가지치기(필터링) 수행
                             FilterSchemaByConfig(schema);
                             if (!ValidateFilteredTablesReady(conn, schema))
@@ -492,7 +490,7 @@ namespace SimulationSpeedTimer
                                 continue;
                             }
 
-                            TryWriteSchemaValidationReport(reportSourceSchema, true);
+                            TryWriteSchemaValidationReport(schema, true);
                             SharedFrameRepository.Instance.Schema = schema;
                             return schema;
                         }
@@ -517,17 +515,20 @@ namespace SimulationSpeedTimer
             {
                 try
                 {
-                    var snapshot = SchemaValidationReportMapper.Map(
-                        _config.DbPath,
-                        _config.ExpectedColumns,
-                        schema,
-                        isSuccess);
+                    var sourceDataset = SchemaValidationComparisonFactory.CreateSourceDataset(schema);
+                    var targetDataset = SchemaValidationComparisonFactory.CreateTargetDataset(_config.ExpectedColumns);
+                    var options = SchemaValidationComparisonFactory.CreateOptions(_config.DbPath);
 
-                    _schemaValidationReportService.TryWrite(snapshot, out _);
+                    if (!isSuccess)
+                    {
+                        options.Title = options.Title + "_실패";
+                    }
+
+                    _comparisonExportService.TryExportHtml(sourceDataset, targetDataset, options, out _);
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[SchemaValidationReport] Failed to build report snapshot: {ex.Message}");
+                    Console.WriteLine($"[ComparisonExport] Failed to build comparison export request: {ex.Message}");
                 }
             }
 

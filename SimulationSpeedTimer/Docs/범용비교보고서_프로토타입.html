@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <title>범용 비교 보고서 프로토타입</title>
+    <style>
+        body
+        {
+            margin: 24px;
+            font-family: "Segoe UI", sans-serif;
+            color: #222222;
+            background: #ffffff;
+        }
+
+        h1,
+        h2
+        {
+            margin-bottom: 8px;
+        }
+
+        .meta
+        {
+            margin-bottom: 18px;
+            line-height: 1.7;
+        }
+
+        table
+        {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 24px;
+            table-layout: fixed;
+        }
+
+        th,
+        td
+        {
+            border: 1px solid #cccccc;
+            padding: 9px 10px;
+            text-align: left;
+            vertical-align: top;
+            font-size: 14px;
+        }
+
+        th
+        {
+            background: #f3f3f3;
+            font-weight: 700;
+        }
+
+        .item-list
+        {
+            margin: 0;
+            padding-left: 18px;
+            column-count: 2;
+            column-gap: 18px;
+        }
+
+        .item-list li
+        {
+            font-size: 12px;
+            line-height: 1.5;
+            word-break: break-word;
+            break-inside: avoid;
+        }
+
+        .single-column
+        {
+            column-count: 1;
+        }
+
+        .cell-block
+        {
+            min-height: 64px;
+        }
+
+        .cell-note
+        {
+            margin-top: 8px;
+            font-size: 12px;
+            color: #666666;
+        }
+
+        .muted
+        {
+            color: #666666;
+        }
+
+        code
+        {
+            background: #f3f3f3;
+            padding: 1px 4px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>소스/타겟 비교 예시</h1>
+
+    <div class="meta">
+        <div><strong>생성 시각:</strong> 2026-04-29 11:08:42</div>
+        <div><strong>비교 방식:</strong> <code>SourceInTarget</code></div>
+        <div><strong>최종 결과:</strong> 거짓</div>
+    </div>
+
+    <h2>1. 소스 표</h2>
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 24%;">소스 키</th>
+                <th style="width: 76%;">소스 항목</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>그룹-A</td>
+                <td>
+                    <ul class="item-list cell-block">
+                        <li>PositionX</li>
+                        <li>PositionY</li>
+                        <li>Speed</li>
+                        <li>Heading</li>
+                        <li>DebugValue</li>
+                    </ul>
+                    <div class="cell-note">항목 수 5</div>
+                </td>
+            </tr>
+            <tr>
+                <td>그룹-B</td>
+                <td>
+                    <ul class="item-list cell-block">
+                        <li>TrackId</li>
+                        <li>Confidence</li>
+                        <li>Priority</li>
+                    </ul>
+                    <div class="cell-note">항목 수 3</div>
+                </td>
+            </tr>
+            <tr>
+                <td>Gr0up-C</td>
+                <td>
+                    <ul class="item-list cell-block">
+                        <li>ModeCode</li>
+                        <li>Classification</li>
+                        <li>Range</li>
+                        <li>ReservedField</li>
+                    </ul>
+                    <div class="cell-note">항목 수 4</div>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>2. 타겟 표</h2>
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 24%;">타겟 키</th>
+                <th style="width: 76%;">타겟 항목</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>그룹-A</td>
+                <td>
+                    <ul class="item-list cell-block">
+                        <li>PositionX</li>
+                        <li>PositionY</li>
+                        <li>Speed</li>
+                        <li>Heading</li>
+                    </ul>
+                    <div class="cell-note">항목 수 4</div>
+                </td>
+            </tr>
+            <tr>
+                <td>그룹-B</td>
+                <td>
+                    <ul class="item-list cell-block">
+                        <li>TrackId</li>
+                        <li>Confidence</li>
+                        <li>Priority</li>
+                        <li>ThreatScore</li>
+                    </ul>
+                    <div class="cell-note">항목 수 4</div>
+                </td>
+            </tr>
+            <tr>
+                <td>그룹-C</td>
+                <td>
+                    <ul class="item-list cell-block">
+                        <li>ModeCode</li>
+                        <li>Classification</li>
+                        <li>Range</li>
+                    </ul>
+                    <div class="cell-note">항목 수 3</div>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>3. 비교 표(소스 기준)</h2>
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 14%;">소스 키</th>
+                <th style="width: 14%;">대응 타겟 키</th>
+                <th style="width: 22%;">소스 항목</th>
+                <th style="width: 22%;">타겟 항목</th>
+                <th style="width: 16%;">부족 항목</th>
+                <th style="width: 12%;">비교 결과</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>그룹-A</td>
+                <td>그룹-A</td>
+                <td>
+                    <ul class="item-list cell-block">
+                        <li>PositionX</li>
+                        <li>PositionY</li>
+                        <li>Speed</li>
+                        <li>Heading</li>
+                        <li>DebugValue</li>
+                    </ul>
+                </td>
+                <td>
+                    <ul class="item-list cell-block">
+                        <li>PositionX</li>
+                        <li>PositionY</li>
+                        <li>Speed</li>
+                        <li>Heading</li>
+                    </ul>
+                </td>
+                <td>
+                    <ul class="item-list single-column">
+                        <li>DebugValue</li>
+                    </ul>
+                </td>
+                <td>거짓</td>
+            </tr>
+            <tr>
+                <td>그룹-B</td>
+                <td>그룹-B</td>
+                <td>
+                    <ul class="item-list cell-block">
+                        <li>TrackId</li>
+                        <li>Confidence</li>
+                        <li>Priority</li>
+                    </ul>
+                </td>
+                <td>
+                    <ul class="item-list cell-block">
+                        <li>TrackId</li>
+                        <li>Confidence</li>
+                        <li>Priority</li>
+                        <li>ThreatScore</li>
+                    </ul>
+                </td>
+                <td><span class="muted">없음</span></td>
+                <td>참</td>
+            </tr>
+            <tr>
+                <td>Gr0up-C</td>
+                <td><span class="muted">대응 타겟 없음</span></td>
+                <td>
+                    <ul class="item-list cell-block">
+                        <li>ModeCode</li>
+                        <li>Classification</li>
+                        <li>Range</li>
+                        <li>ReservedField</li>
+                    </ul>
+                </td>
+                <td><span class="muted">비교 가능한 타겟 없음</span></td>
+                <td>
+                    <ul class="item-list single-column">
+                        <li>ModeCode</li>
+                        <li>Classification</li>
+                        <li>Range</li>
+                        <li>ReservedField</li>
+                    </ul>
+                </td>
+                <td>거짓</td>
+            </tr>
+        </tbody>
+    </table>
+</body>
+</html>
