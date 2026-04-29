@@ -21,7 +21,7 @@ namespace SimulationSpeedTimer
             if (report == null) throw new ArgumentNullException(nameof(report));
 
             // 비교 방식에 맞는 표 머리글을 고릅니다.
-            var labels = ResolveLabels(report.Mode);
+            var labels = ResolveLabels(report.Mode, report.SourceLabel, report.TargetLabel);
             var html = new StringBuilder();
 
             html.AppendLine("<!DOCTYPE html>");
@@ -53,25 +53,39 @@ namespace SimulationSpeedTimer
             html.AppendLine("        code { background: #f3f3f3; padding: 1px 4px; border-radius: 4px; }");
             html.AppendLine("        a { color: #222222; }");
             html.AppendLine("    </style>");
+            html.AppendLine("    <script>");
+            html.AppendLine("        function openDetailFromHash() {");
+            html.AppendLine("            var hash = window.location.hash;");
+            html.AppendLine("            if (!hash) { return; }");
+            html.AppendLine("            var target = document.getElementById(hash.substring(1));");
+            html.AppendLine("            if (!target) { return; }");
+            html.AppendLine("            if (target.tagName && target.tagName.toLowerCase() === 'details') {");
+            html.AppendLine("                target.open = true;");
+            html.AppendLine("            }");
+            html.AppendLine("            target.scrollIntoView({ behavior: 'smooth', block: 'start' });");
+            html.AppendLine("        }");
+            html.AppendLine("        document.addEventListener('DOMContentLoaded', openDetailFromHash);");
+            html.AppendLine("        window.addEventListener('hashchange', openDetailFromHash);");
+            html.AppendLine("    </script>");
             html.AppendLine("</head>");
             html.AppendLine("<body>");
             html.AppendLine("    <h1>" + Encode(report.Title) + "</h1>");
             html.AppendLine("    <div class=\"meta\">");
-            html.AppendLine("        <div><strong>\uC0DD\uC131 \uC2DC\uAC01:</strong> " + Encode(report.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")) + "</div>");
-            html.AppendLine("        <div><strong>\uBE44\uAD50 \uBC29\uC2DD:</strong> <code>" + Encode(report.Mode.ToString()) + "</code></div>");
-            html.AppendLine("        <div><strong>\uCD5C\uC885 \uACB0\uACFC:</strong> " + RenderResult(report.IsMatch) + "</div>");
+            html.AppendLine("        <div><strong>생성 시각:</strong> " + Encode(report.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")) + "</div>");
+            html.AppendLine("        <div><strong>비교 방식:</strong> <code>" + Encode(report.Mode.ToString()) + "</code></div>");
+            html.AppendLine("        <div><strong>최종 결과:</strong> " + RenderResult(report.IsMatch) + "</div>");
             html.AppendLine("    </div>");
 
             AppendDatasetSummaryTable(
                 html,
-                "1. \uC18C\uC2A4 \uC694\uC57D \uD45C",
-                "\uC18C\uC2A4 \uD0A4",
+                "1. " + labels.SourceLabel + " 요약 표",
+                labels.SourceKeyLabel,
                 report.SourceDataset);
 
             AppendDatasetSummaryTable(
                 html,
-                "2. \uD0C0\uAC9F \uC694\uC57D \uD45C",
-                "\uD0C0\uAC9F \uD0A4",
+                "2. " + labels.TargetLabel + " 요약 표",
+                labels.TargetKeyLabel,
                 report.TargetDataset);
 
             AppendComparisonSummaryTable(html, report, labels);
@@ -94,7 +108,7 @@ namespace SimulationSpeedTimer
             html.AppendLine("        <thead>");
             html.AppendLine("            <tr>");
             html.AppendLine("                <th style=\"width: 70%;\">" + keyLabel + "</th>");
-            html.AppendLine("                <th style=\"width: 30%;\">\uD56D\uBAA9 \uC218</th>");
+            html.AppendLine("                <th style=\"width: 30%;\">항목 수</th>");
             html.AppendLine("            </tr>");
             html.AppendLine("        </thead>");
             html.AppendLine("        <tbody>");
@@ -116,17 +130,17 @@ namespace SimulationSpeedTimer
             ComparisonReport report,
             ComparisonRenderLabels labels)
         {
-            html.AppendLine("    <h2>3. \uBE44\uAD50 \uC694\uC57D \uD45C</h2>");
+            html.AppendLine("    <h2>3. 비교 요약 표</h2>");
             html.AppendLine("    <table>");
             html.AppendLine("        <thead>");
             html.AppendLine("            <tr>");
             html.AppendLine("                <th style=\"width: 22%;\">" + labels.PrimaryKeyLabel + "</th>");
             html.AppendLine("                <th style=\"width: 18%;\">" + labels.SecondaryKeyLabel + "</th>");
-            html.AppendLine("                <th style=\"width: 12%;\">" + labels.PrimaryItemsLabel + " \uC218</th>");
-            html.AppendLine("                <th style=\"width: 14%;\">" + labels.SecondaryItemsLabel + " \uC218</th>");
-            html.AppendLine("                <th style=\"width: 12%;\">" + labels.DifferenceLabel + " \uC218</th>");
-            html.AppendLine("                <th style=\"width: 10%;\">\uACB0\uACFC</th>");
-            html.AppendLine("                <th style=\"width: 12%;\">\uC0C1\uC138</th>");
+            html.AppendLine("                <th style=\"width: 12%;\">" + labels.PrimaryItemsLabel + " 수</th>");
+            html.AppendLine("                <th style=\"width: 14%;\">" + labels.SecondaryItemsLabel + " 수</th>");
+            html.AppendLine("                <th style=\"width: 12%;\">" + labels.DifferenceLabel + " 수</th>");
+            html.AppendLine("                <th style=\"width: 10%;\">결과</th>");
+            html.AppendLine("                <th style=\"width: 12%;\">상세</th>");
             html.AppendLine("            </tr>");
             html.AppendLine("        </thead>");
             html.AppendLine("        <tbody>");
@@ -146,7 +160,7 @@ namespace SimulationSpeedTimer
                 html.AppendLine("                <td class=\"count\">" + secondaryItems.Count + "</td>");
                 html.AppendLine("                <td class=\"count\">" + differenceItems.Count + "</td>");
                 html.AppendLine("                <td>" + RenderResult(row.IsMatch) + "</td>");
-                html.AppendLine("                <td><a href=\"#" + detailId + "\">\uBCF4\uAE30</a></td>");
+                html.AppendLine("                <td><a href=\"#" + detailId + "\">보기</a></td>");
                 html.AppendLine("            </tr>");
             }
 
@@ -159,7 +173,7 @@ namespace SimulationSpeedTimer
             ComparisonReport report,
             ComparisonRenderLabels labels)
         {
-            html.AppendLine("    <h2>4. \uC0C1\uC138</h2>");
+            html.AppendLine("    <h2>4. 상세</h2>");
             html.AppendLine("    <div class=\"details\">");
 
             for (int i = 0; i < report.Rows.Count; i++)
@@ -226,7 +240,7 @@ namespace SimulationSpeedTimer
 
             if (values.Count == 0)
             {
-                return "                            <div class=\"muted\">\uC5C6\uC74C.</div>";
+                return "                            <div class=\"muted\">없음.</div>";
             }
 
             var html = new StringBuilder();
@@ -267,8 +281,8 @@ namespace SimulationSpeedTimer
         private static string RenderResult(bool isMatch)
         {
             return isMatch
-                ? "<span class=\"result-true\">\uCC38</span>"
-                : "<span class=\"result-false\">\uAC70\uC9D3</span>";
+                ? "<span class=\"result-true\">참</span>"
+                : "<span class=\"result-false\">거짓</span>";
         }
 
         private static string BuildDetailId(string primaryKey, int index)
@@ -296,21 +310,28 @@ namespace SimulationSpeedTimer
             return WebUtility.HtmlEncode(value ?? string.Empty);
         }
 
-        private static ComparisonRenderLabels ResolveLabels(ComparisonMode mode)
+        private static ComparisonRenderLabels ResolveLabels(ComparisonMode mode, string sourceLabel, string targetLabel)
         {
+            sourceLabel = string.IsNullOrWhiteSpace(sourceLabel) ? "소스" : sourceLabel;
+            targetLabel = string.IsNullOrWhiteSpace(targetLabel) ? "타겟" : targetLabel;
+
             // 같은 데이터라도 기준 축이 달라지면 표 의미가 달라집니다.
             switch (mode)
             {
                 case ComparisonMode.SourceInTarget:
                     return new ComparisonRenderLabels
                     {
-                        PrimaryKeyLabel = "\uC18C\uC2A4 \uD0A4",
-                        SecondaryKeyLabel = "\uB300\uC751 \uD0C0\uAC9F \uD0A4",
-                        PrimaryItemsLabel = "\uC18C\uC2A4 \uD56D\uBAA9",
-                        SecondaryItemsLabel = "\uD0C0\uAC9F \uD56D\uBAA9",
-                        DifferenceLabel = "\uBD80\uC871 \uD56D\uBAA9",
-                        EmptyKeyText = "\uB300\uC751 \uD0C0\uAC9F \uC5C6\uC74C",
-                        EmptyItemsText = "\uBE44\uAD50 \uAC00\uB2A5\uD55C \uD0C0\uAC9F \uC5C6\uC74C",
+                        SourceLabel = sourceLabel,
+                        TargetLabel = targetLabel,
+                        SourceKeyLabel = sourceLabel + " 키",
+                        TargetKeyLabel = targetLabel + " 키",
+                        PrimaryKeyLabel = sourceLabel + " 키",
+                        SecondaryKeyLabel = "대응 " + targetLabel + " 키",
+                        PrimaryItemsLabel = sourceLabel + " 항목",
+                        SecondaryItemsLabel = targetLabel + " 항목",
+                        DifferenceLabel = "부족 항목",
+                        EmptyKeyText = "대응 " + targetLabel + " 없음",
+                        EmptyItemsText = "비교 가능한 " + targetLabel + " 없음",
                         GetPrimaryKey = row => row.SourceKey,
                         GetSecondaryKey = row => row.TargetKey,
                         GetPrimaryItems = row => row.SourceItems,
@@ -319,13 +340,17 @@ namespace SimulationSpeedTimer
                 case ComparisonMode.TargetInSource:
                     return new ComparisonRenderLabels
                     {
-                        PrimaryKeyLabel = "\uD0C0\uAC9F \uD0A4",
-                        SecondaryKeyLabel = "\uB300\uC751 \uC18C\uC2A4 \uD0A4",
-                        PrimaryItemsLabel = "\uD0C0\uAC9F \uD56D\uBAA9",
-                        SecondaryItemsLabel = "\uC18C\uC2A4 \uD56D\uBAA9",
-                        DifferenceLabel = "\uBD80\uC871 \uD56D\uBAA9",
-                        EmptyKeyText = "\uB300\uC751 \uC18C\uC2A4 \uC5C6\uC74C",
-                        EmptyItemsText = "\uBE44\uAD50 \uAC00\uB2A5\uD55C \uC18C\uC2A4 \uC5C6\uC74C",
+                        SourceLabel = sourceLabel,
+                        TargetLabel = targetLabel,
+                        SourceKeyLabel = sourceLabel + " 키",
+                        TargetKeyLabel = targetLabel + " 키",
+                        PrimaryKeyLabel = targetLabel + " 키",
+                        SecondaryKeyLabel = "대응 " + sourceLabel + " 키",
+                        PrimaryItemsLabel = targetLabel + " 항목",
+                        SecondaryItemsLabel = sourceLabel + " 항목",
+                        DifferenceLabel = "부족 항목",
+                        EmptyKeyText = "대응 " + sourceLabel + " 없음",
+                        EmptyItemsText = "비교 가능한 " + sourceLabel + " 없음",
                         GetPrimaryKey = row => row.TargetKey,
                         GetSecondaryKey = row => row.SourceKey,
                         GetPrimaryItems = row => row.TargetItems,
@@ -335,13 +360,17 @@ namespace SimulationSpeedTimer
                 default:
                     return new ComparisonRenderLabels
                     {
-                        PrimaryKeyLabel = "\uC18C\uC2A4 \uD0A4",
-                        SecondaryKeyLabel = "\uB300\uC751 \uD0C0\uAC9F \uD0A4",
-                        PrimaryItemsLabel = "\uC18C\uC2A4 \uD56D\uBAA9",
-                        SecondaryItemsLabel = "\uD0C0\uAC9F \uD56D\uBAA9",
-                        DifferenceLabel = "\uCC28\uC774 \uD56D\uBAA9",
-                        EmptyKeyText = "\uB300\uC751 \uD0C0\uAC9F \uC5C6\uC74C",
-                        EmptyItemsText = "\uBE44\uAD50 \uAC00\uB2A5\uD55C \uD0C0\uAC9F \uC5C6\uC74C",
+                        SourceLabel = sourceLabel,
+                        TargetLabel = targetLabel,
+                        SourceKeyLabel = sourceLabel + " 키",
+                        TargetKeyLabel = targetLabel + " 키",
+                        PrimaryKeyLabel = sourceLabel + " 키",
+                        SecondaryKeyLabel = "대응 " + targetLabel + " 키",
+                        PrimaryItemsLabel = sourceLabel + " 항목",
+                        SecondaryItemsLabel = targetLabel + " 항목",
+                        DifferenceLabel = "차이 항목",
+                        EmptyKeyText = "대응 " + targetLabel + " 없음",
+                        EmptyItemsText = "비교 가능한 " + targetLabel + " 없음",
                         GetPrimaryKey = row => row.SourceKey,
                         GetSecondaryKey = row => row.TargetKey,
                         GetPrimaryItems = row => row.SourceItems,
@@ -352,6 +381,10 @@ namespace SimulationSpeedTimer
 
         private class ComparisonRenderLabels
         {
+            public string SourceLabel { get; set; }
+            public string TargetLabel { get; set; }
+            public string SourceKeyLabel { get; set; }
+            public string TargetKeyLabel { get; set; }
             public string PrimaryKeyLabel { get; set; }
             public string SecondaryKeyLabel { get; set; }
             public string PrimaryItemsLabel { get; set; }

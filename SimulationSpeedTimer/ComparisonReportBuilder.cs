@@ -33,8 +33,10 @@ namespace SimulationSpeedTimer
             var report = new ComparisonReport
             {
                 CreatedAt = DateTime.Now,
-                Title = string.IsNullOrWhiteSpace(options.Title) ? "\uBE44\uAD50 \uBCF4\uACE0\uC11C" : options.Title,
+                Title = string.IsNullOrWhiteSpace(options.Title) ? "비교 보고서" : options.Title,
                 Mode = options.Mode,
+                SourceLabel = string.IsNullOrWhiteSpace(options.SourceLabel) ? "소스" : options.SourceLabel,
+                TargetLabel = string.IsNullOrWhiteSpace(options.TargetLabel) ? "타겟" : options.TargetLabel,
                 SourceDataset = normalizedSource,
                 TargetDataset = normalizedTarget,
             };

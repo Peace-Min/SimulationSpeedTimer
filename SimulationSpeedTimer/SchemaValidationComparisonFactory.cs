@@ -65,14 +65,16 @@ namespace SimulationSpeedTimer
         {
             var dbName = Path.GetFileNameWithoutExtension(dbPath);
             var title = string.IsNullOrWhiteSpace(dbName)
-                ? "DB_Config_\uBE44\uAD50"
-                : $"DB_Config_\uBE44\uAD50_{dbName}";
+                ? "DB_Config_비교"
+                : $"DB_Config_비교_{dbName}";
 
             return new ComparisonExportOptions
             {
                 // 기본 출력 위치와 비교 방식을 여기서 고정합니다.
                 OutputDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs", "Comparison"),
                 Title = title,
+                SourceLabel = "DB 스키마",
+                TargetLabel = "Config",
                 Mode = ComparisonMode.TargetInSource,
             };
         }

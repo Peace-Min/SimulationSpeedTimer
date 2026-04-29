@@ -41,6 +41,10 @@ namespace SimulationSpeedTimer
 
         public string Title { get; set; }
 
+        public string SourceLabel { get; set; }
+
+        public string TargetLabel { get; set; }
+
         public ComparisonMode Mode { get; set; }
     }
 
@@ -74,6 +78,10 @@ namespace SimulationSpeedTimer
         public string Title { get; set; }
 
         public ComparisonMode Mode { get; set; }
+
+        public string SourceLabel { get; set; }
+
+        public string TargetLabel { get; set; }
 
         public ComparisonDataset SourceDataset { get; set; }
 
