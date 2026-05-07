@@ -275,6 +275,7 @@ namespace SimulationSpeedTimer
 
                     // 5. Spatial_Data
                     model.SpatialData = ReadTableList(conn, "Spatial_Data", ReadSpatialDataRow);
+                    model.SpatialDataCache = BuildSpatialDataCache(model.SpatialData);
 
                     // 6. Spatial_Visual_Data
                     model.SpatialVisualData = ReadTableList(conn, "Spatial_Visual_Data", ReadSpatialVisualDataRow);
@@ -286,6 +287,45 @@ namespace SimulationSpeedTimer
             }
 
             return model;
+        }
+
+        private SpatialDataCache BuildSpatialDataCache(List<SpatialData> spatialData)
+        {
+            var cache = new SpatialDataCache();
+
+            foreach (var item in spatialData)
+            {
+                if (string.IsNullOrWhiteSpace(item.SpatialObjectName))
+                {
+                    continue;
+                }
+
+                if (!cache.ByObjectName.TryGetValue(item.SpatialObjectName, out var objectPoints))
+                {
+                    objectPoints = new List<SpatialData>();
+                    cache.ByObjectName[item.SpatialObjectName] = objectPoints;
+                }
+
+                objectPoints.Add(item);
+
+                var time = item.STime;
+
+                if (!cache.ByTimeAndObjectName.TryGetValue(time, out var timeBucket))
+                {
+                    timeBucket = new Dictionary<string, List<SpatialData>>();
+                    cache.ByTimeAndObjectName[time] = timeBucket;
+                }
+
+                if (!timeBucket.TryGetValue(item.SpatialObjectName, out var timeObjectPoints))
+                {
+                    timeObjectPoints = new List<SpatialData>();
+                    timeBucket[item.SpatialObjectName] = timeObjectPoints;
+                }
+
+                timeObjectPoints.Add(item);
+            }
+
+            return cache;
         }
 
         private List<T> ReadTableList<T>(SQLiteConnection conn, string tableName, Func<SQLiteDataReader, T> mapper)
