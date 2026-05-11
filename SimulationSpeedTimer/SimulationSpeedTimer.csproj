@@ -79,6 +79,7 @@
     <Compile Include="ProgressViewModel.cs" />
     <Compile Include="SimulationContext.cs" />
     <Compile Include="ResolvedQueryInfo.cs" />
+    <Compile Include="SimulationFramePlaybackProvider.cs" />
     <Compile Include="SimulationHistoryService.cs" />
     <Compile Include="TableDataViewModel.cs" />
     <Compile Include="Program.cs" />
