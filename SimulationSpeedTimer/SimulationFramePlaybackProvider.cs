@@ -17,24 +17,31 @@ namespace SimulationSpeedTimer
         }
 
         /// <summary>
-        /// 특정 시간의 프레임을 시리즈별 커서 데이터로 변환한다.
+        /// 특정 시간의 프레임을 차트 커서 갱신 객체로 변환한다.
         /// </summary>
-        public List<SimulationFrameCursorPoint> BuildCursorFrame(
+        public List<TCursorUpdate> BuildCursorFrame<TCursorUpdate>(
             double time,
             IReadOnlyList<DatabaseQueryConfig> configs,
-            bool is3DViewer)
+            bool is3DViewer,
+            Func<int, double, double, TCursorUpdate> create2D,
+            Func<int, double, double, double, TCursorUpdate> create3D,
+            Func<int, TCursorUpdate> createEmpty)
         {
-            var cursorPoints = new List<SimulationFrameCursorPoint>(configs?.Count ?? 0);
+            if (create2D == null) throw new ArgumentNullException(nameof(create2D));
+            if (create3D == null) throw new ArgumentNullException(nameof(create3D));
+            if (createEmpty == null) throw new ArgumentNullException(nameof(createEmpty));
+
+            var cursorUpdates = new List<TCursorUpdate>(configs?.Count ?? 0);
 
             if (configs == null || configs.Count == 0)
             {
-                return cursorPoints;
+                return cursorUpdates;
             }
 
             if (!_framesByTime.TryGetValue(time, out var frame))
             {
-                AddEmptyCursorPoints(time, configs, cursorPoints);
-                return cursorPoints;
+                AddEmptyCursorUpdates(configs, cursorUpdates, createEmpty);
+                return cursorUpdates;
             }
 
             for (var seriesIndex = 0; seriesIndex < configs.Count; seriesIndex++)
@@ -52,29 +59,29 @@ namespace SimulationSpeedTimer
 
                 if (!x.HasValue || !y.HasValue)
                 {
-                    cursorPoints.Add(SimulationFrameCursorPoint.Empty(seriesIndex, time));
+                    cursorUpdates.Add(createEmpty(seriesIndex));
                     continue;
                 }
 
                 if (is3DViewer)
                 {
                     var z = GetValue(frame, config.ZColumn.ObjectName, config.ZColumn.AttributeName);
-                    cursorPoints.Add(z.HasValue
-                        ? SimulationFrameCursorPoint.From3D(seriesIndex, frame.Time, x.Value, y.Value, z.Value)
-                        : SimulationFrameCursorPoint.Empty(seriesIndex, time));
+                    cursorUpdates.Add(z.HasValue
+                        ? create3D(seriesIndex, x.Value, y.Value, z.Value)
+                        : createEmpty(seriesIndex));
                     continue;
                 }
 
-                cursorPoints.Add(SimulationFrameCursorPoint.From2D(seriesIndex, frame.Time, x.Value, y.Value));
+                cursorUpdates.Add(create2D(seriesIndex, x.Value, y.Value));
             }
 
-            return cursorPoints;
+            return cursorUpdates;
         }
 
-        private static void AddEmptyCursorPoints(
-            double time,
+        private static void AddEmptyCursorUpdates<TCursorUpdate>(
             IReadOnlyList<DatabaseQueryConfig> configs,
-            ICollection<SimulationFrameCursorPoint> cursorPoints)
+            ICollection<TCursorUpdate> cursorUpdates,
+            Func<int, TCursorUpdate> createEmpty)
         {
             for (var seriesIndex = 0; seriesIndex < configs.Count; seriesIndex++)
             {
@@ -84,7 +91,7 @@ namespace SimulationSpeedTimer
                     continue;
                 }
 
-                cursorPoints.Add(SimulationFrameCursorPoint.Empty(seriesIndex, time));
+                cursorUpdates.Add(createEmpty(seriesIndex));
             }
         }
 
@@ -108,49 +115,6 @@ namespace SimulationSpeedTimer
             {
                 return null;
             }
-        }
-    }
-
-    /// <summary>
-    /// 차트 라이브러리 DTO로 변환하기 전 단계의 재생 커서 데이터.
-    /// </summary>
-    public sealed class SimulationFrameCursorPoint
-    {
-        private SimulationFrameCursorPoint(int seriesIndex, double time, double x, double y, double? z, bool hasValue)
-        {
-            SeriesIndex = seriesIndex;
-            Time = time;
-            X = x;
-            Y = y;
-            Z = z;
-            HasValue = hasValue;
-        }
-
-        public int SeriesIndex { get; }
-
-        public double Time { get; }
-
-        public double X { get; }
-
-        public double Y { get; }
-
-        public double? Z { get; }
-
-        public bool HasValue { get; }
-
-        public static SimulationFrameCursorPoint Empty(int seriesIndex, double time)
-        {
-            return new SimulationFrameCursorPoint(seriesIndex, time, 0d, 0d, null, false);
-        }
-
-        public static SimulationFrameCursorPoint From2D(int seriesIndex, double time, double x, double y)
-        {
-            return new SimulationFrameCursorPoint(seriesIndex, time, x, y, null, true);
-        }
-
-        public static SimulationFrameCursorPoint From3D(int seriesIndex, double time, double x, double y, double z)
-        {
-            return new SimulationFrameCursorPoint(seriesIndex, time, x, y, z, true);
         }
     }
 }
