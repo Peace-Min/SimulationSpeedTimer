@@ -117,11 +117,13 @@ namespace SimulationSpeedTimer
 
             // [상수] 부동소수점 조회의 경계값을 포함하기 위한 마진 (1마이크로초)
             private const double QueryMargin = 0.000001;
+            private int _yieldCounter = 0;
 
             private Task _workerTask;
             private CancellationTokenSource _cts;
             private BlockingCollection<double> _timeBuffer;
             private SimulationSchema _schema;
+            private Dictionary<string, double> _tableCursors = new Dictionary<string, double>();
 
             // 정상 종료 콜백 (Stop 호출 시 null 처리됨)
             private volatile Action _completionCallback;
@@ -256,17 +258,98 @@ namespace SimulationSpeedTimer
                                 // [정상 진행] 격차가 크지 않으면 다음 체크포인트로 1단계만 전진
                                 nextCheckpoint = Math.Round(nextCheckpoint + _config.QueryInterval, 1);
                             }
+
+                            if (++_yieldCounter % 50 == 0)
+                            {
+                                Thread.Sleep(10);
+                            }
                         }
 
                         if (token.IsCancellationRequested && _timeBuffer.Count == 0) break;
                     }
 
                     // 4. 잔여 데이터 루프 (Graceful Shutdown)
-                    if (lastSeenTime > lastQueryEndTime)
+                    // 테이블별 마지막 조회 시간부터 시뮬레이션 종료 시간까지 잔여 범위를 추가 조회합니다.
+                    var finalEndTime = Math.Max(lastSeenTime, lastQueryEndTime);
+
+                    if (_schema != null && _schema.Tables != null)
                     {
-                        // Stop이 호출되어 token이 취소된 상태일 수 있으므로, 잔여 데이터 처리는 취소 없이 수행합니다.
-                        // [수정] 마지막 데이터(lastSeenTime)가 포함되도록 Margin 추가
-                        ProcessRange(connection, lastQueryEndTime, lastSeenTime + QueryMargin, CancellationToken.None);
+                        var residualChunk = new Dictionary<double, SimulationFrame>();
+                        bool hasData = false;
+
+                        foreach (var tableInfo in _schema.Tables)
+                        {
+                            try
+                            {
+                                var startCursor = 0.0; // 해당 테이블의 마지막 read cursor입니다.
+                                if (_tableCursors.TryGetValue(tableInfo.TableName, out double cursor))
+                                {
+                                    startCursor = cursor;
+                                }
+
+                                // 이미 최종 시간까지 읽었다면 건너뜁니다.
+                                if (startCursor >= finalEndTime) { continue; }
+
+                                using (var cmd = connection.CreateCommand())
+                                {
+                                    // 테이블 마지막 조회 시간부터 사용자 종료 시간까지 조회합니다.
+                                    cmd.CommandText = $"SELECT * FROM {tableInfo.TableName} WHERE s_time > @start AND s_time <= @end";
+                                    cmd.Parameters.AddWithValue("@start", startCursor);
+                                    cmd.Parameters.AddWithValue("@end", finalEndTime + QueryMargin);
+
+                                    using (var reader = cmd.ExecuteReader())
+                                    {
+                                        while (reader.Read())
+                                        {
+                                            double t = Convert.ToDouble(reader["s_time"]);
+
+                                            // QueryMargin으로 인해 종료 시간을 살짝 넘긴 데이터는 버립니다.
+                                            if (t > finalEndTime && t > finalEndTime + 0.000001) continue;
+
+                                            if (!residualChunk.TryGetValue(t, out var frame))
+                                            {
+                                                frame = new SimulationFrame(t);
+                                                residualChunk[t] = frame;
+                                            }
+
+                                            // 데이터 매핑
+                                            string resolvedName = !string.IsNullOrEmpty(tableInfo.ObjectName) ? tableInfo.ObjectName : tableInfo.TableName;
+                                            var tableData = frame.GetTable(resolvedName);
+
+                                            if (tableData == null)
+                                            {
+                                                tableData = new SimulationTable(resolvedName);
+                                                frame.AddOrUpdateTable(tableData);
+                                            }
+
+                                            for (int i = 0; i < reader.FieldCount; i++)
+                                            {
+                                                string colName = reader.GetName(i);
+                                                if (colName == "s_time") continue;
+
+                                                string resolvedColName = colName;
+                                                if (tableInfo.ColumnsByPhysicalName.TryGetValue(colName, out var colInfo))
+                                                {
+                                                    resolvedColName = colInfo.AttributeName;
+                                                }
+
+                                                var val = reader.GetValue(i);
+                                                if (val != DBNull.Value) tableData.AddColumn(resolvedColName, val);
+                                            }
+
+                                            hasData = true;
+                                        }
+                                    }
+                                }
+                            }
+                            catch { /* 테이블 조회 실패 무시 */ }
+                        }
+
+                        if (hasData)
+                        {
+                            SharedFrameRepository.Instance.StoreChunk(residualChunk, this.Id);
+                            Console.WriteLine($"[{Id}] Finalizing: Synced residual data up to {finalEndTime:F1} ({residualChunk.Count} frames).");
+                        }
                     }
                 }
                 catch (OperationCanceledException) { }
@@ -375,6 +458,11 @@ namespace SimulationSpeedTimer
                                 while (reader.Read())
                                 {
                                     double t = Convert.ToDouble(reader["s_time"]);
+                                    if (!_tableCursors.TryGetValue(tableInfo.TableName, out double cursor) || t > cursor)
+                                    {
+                                        _tableCursors[tableInfo.TableName] = t;
+                                    }
+
                                     if (!chunk.TryGetValue(t, out var frame))
                                     {
                                         frame = new SimulationFrame(t);
@@ -443,13 +531,19 @@ namespace SimulationSpeedTimer
                 {
                     try
                     {
-                        var builder = new SQLiteConnectionStringBuilder { DataSource = _config.DbPath, Pooling = false, FailIfMissing = true };
+                        var builder = new SQLiteConnectionStringBuilder
+                        {
+                            DataSource = _config.DbPath,
+                            Pooling = false,
+                            ReadOnly = true,
+                            FailIfMissing = true
+                        };
                         var conn = new SQLiteConnection(builder.ToString());
                         conn.Open();
                         return conn;
                     }
-                    catch (SQLiteException) { token.WaitHandle.WaitOne(500); }
-                    catch (Exception) { token.WaitHandle.WaitOne(1000); }
+                    catch (SQLiteException) { token.WaitHandle.WaitOne(50); }
+                    catch (Exception) { token.WaitHandle.WaitOne(50); }
                 }
                 return null;
             }
