@@ -305,7 +305,7 @@ namespace SimulationSpeedTimer
                     // 4. 잔여 데이터 루프 (Graceful Shutdown)
                     // 테이블별 마지막 조회 시간부터 시뮬레이션 종료 시간까지 잔여 범위를 추가 조회합니다.
                     var finalEndTime = Math.Max(lastSeenTime, lastQueryEndTime);
-                    var maxDbTime = GetMaxTimeFromDB(connection);
+                    var maxDbTime = WaitForFinalDbMax(connection, lastSeenTime);
                     if (maxDbTime > finalEndTime)
                     {
                         finalEndTime = maxDbTime;
@@ -620,6 +620,43 @@ namespace SimulationSpeedTimer
                 }
 
                 return -1.0;
+            }
+
+            private double WaitForFinalDbMax(SQLiteConnection conn, double lastSeenTime)
+            {
+                var maxDbTime = GetMaxTimeFromDB(conn);
+
+                Debug.WriteLine($"[FinalDbMaxWait:Start] Session={Id}, LastSeen={lastSeenTime:F5}, DbMax={maxDbTime:F5}, RetryCount={_config.RetryCount}, RetryIntervalMs={_config.RetryIntervalMs}");
+
+                if (maxDbTime >= lastSeenTime)
+                {
+                    Debug.WriteLine($"[FinalDbMaxWait:End] Session={Id}, LastSeen={lastSeenTime:F5}, DbMax={maxDbTime:F5}, ReachedLastSeen=True");
+                    return maxDbTime;
+                }
+
+                for (int attempt = 1; attempt <= _config.RetryCount; attempt++)
+                {
+                    Thread.Sleep(_config.RetryIntervalMs);
+
+                    var previousDbMax = maxDbTime;
+                    var nextDbMax = GetMaxTimeFromDB(conn);
+                    if (nextDbMax > maxDbTime)
+                    {
+                        maxDbTime = nextDbMax;
+                    }
+
+                    var dbMaxIncreased = maxDbTime > previousDbMax;
+                    Debug.WriteLine($"[FinalDbMaxWait:Retry] Session={Id}, Attempt={attempt}/{_config.RetryCount}, LastSeen={lastSeenTime:F5}, DbMax={maxDbTime:F5}, LatestDbMax={nextDbMax:F5}, DbMaxIncreased={dbMaxIncreased}");
+
+                    if (maxDbTime >= lastSeenTime && !dbMaxIncreased)
+                    {
+                        break;
+                    }
+                }
+
+                Debug.WriteLine($"[FinalDbMaxWait:End] Session={Id}, LastSeen={lastSeenTime:F5}, DbMax={maxDbTime:F5}, ReachedLastSeen={maxDbTime >= lastSeenTime}");
+
+                return maxDbTime;
             }
 
             private double GetMaxTimeFromDB(SQLiteConnection conn)
