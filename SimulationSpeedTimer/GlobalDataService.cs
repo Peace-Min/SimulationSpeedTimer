@@ -223,12 +223,6 @@ namespace SimulationSpeedTimer
                     connection = WaitForConnection(token);
                     if (connection == null) return;
 
-                    using (var cmd = connection.CreateCommand())
-                    {
-                        cmd.CommandText = "PRAGMA journal_mode=WAL;";
-                        cmd.ExecuteNonQuery();
-                    }
-
                     // 2. 스키마 준비
                     _schema = WaitForSchemaReady(connection, token);
                     if (_schema == null) return;
@@ -430,31 +424,13 @@ namespace SimulationSpeedTimer
 
                     if (connection != null)
                     {
-                        // Checkpoint 실행 (WAL 파일 정리 준비)
-                        TryCheckpoint(connection);
                         connection.Dispose();
                     }
-
-                    // SQLite 풀 정리 및 파일 삭제
-                    SQLiteConnection.ClearAllPools();
-                    TryDeleteWalFiles();
 
                     _timeBuffer?.Dispose();
                     _cts?.Dispose();
                     Console.WriteLine($"[{Id}] Session Disposed.");
                 }
-            }
-
-            private void TryDeleteWalFiles()
-            {
-                try
-                {
-                    string walPath = _config.DbPath + "-wal";
-                    string shmPath = _config.DbPath + "-shm";
-                    if (System.IO.File.Exists(walPath)) System.IO.File.Delete(walPath);
-                    if (System.IO.File.Exists(shmPath)) System.IO.File.Delete(shmPath);
-                }
-                catch { /* 파일 잠금 등으로 삭제 실패 시 무시 */ }
             }
 
             private void ProcessRange(SQLiteConnection conn, double start, double end, CancellationToken token)
@@ -821,18 +797,6 @@ namespace SimulationSpeedTimer
                 catch { return false; }
             }
 
-            private void TryCheckpoint(SQLiteConnection conn)
-            {
-                try
-                {
-                    using (var cmd = conn.CreateCommand())
-                    {
-                        cmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
-                        cmd.ExecuteNonQuery();
-                    }
-                }
-                catch { }
-            }
         }
     }
 }
