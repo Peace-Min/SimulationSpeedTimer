@@ -38,6 +38,11 @@ namespace SimulationSpeedTimer
             /// </summary>
             public double BoundaryToleranceSeconds { get; set; } = 0.000001;
 
+            /// <summary>
+            /// 실시간 조회 시 현재 시뮬레이션 시간보다 지연해서 읽을 시간(초)입니다.
+            /// </summary>
+            public double ReadDelaySeconds { get; set; } = 0.0;
+
             public int RetryCount { get; set; } = 3;
             public int RetryIntervalMs { get; set; } = 10;
 
@@ -208,6 +213,11 @@ namespace SimulationSpeedTimer
                         throw new InvalidOperationException("[GlobalDataService] BoundaryToleranceSeconds must be greater than or equal to zero.");
                     }
 
+                    if (_config.ReadDelaySeconds < 0)
+                    {
+                        throw new InvalidOperationException("[GlobalDataService] ReadDelaySeconds must be greater than or equal to zero.");
+                    }
+
                     // 1. DB 연결 및 초기화
                     connection = WaitForConnection(token);
                     if (connection == null) return;
@@ -233,7 +243,14 @@ namespace SimulationSpeedTimer
                     foreach (var time in _timeBuffer.GetConsumingEnumerable())
                     {
                         lastSeenTime = time;
-                        decimal currentTime = (decimal)time;
+                        double readableTime = time - _config.ReadDelaySeconds;
+                        if (readableTime < 0)
+                        {
+                            if (token.IsCancellationRequested && _timeBuffer.Count == 0) break;
+                            continue;
+                        }
+
+                        decimal currentTime = (decimal)readableTime;
 
                         if (currentTime >= nextCheckpoint)
                         {
@@ -256,7 +273,7 @@ namespace SimulationSpeedTimer
                             {
                                 // [수정] Fast-Forward 시, time 지점의 데이터도 포함해서 처리해야 하므로 허용 오차를 더해줍니다.
                                 // 또한 다음 Loop 시작점(lastQueryEndTime)도 이 허용 오차가 더해진 값이어야 중복 조회가 발생하지 않습니다.
-                                double safeEndTime = time + _config.BoundaryToleranceSeconds;
+                                double safeEndTime = readableTime + _config.BoundaryToleranceSeconds;
 
                                 // 점프할 구간의 데이터를 통째로 처리 (데이터 누락 방지)
                                 ProcessRange(connection, (double)nextCheckpoint, safeEndTime, token);
@@ -302,11 +319,9 @@ namespace SimulationSpeedTimer
                         {
                             try
                             {
-                                var startCursor = 0.0; // 해당 테이블의 마지막 read cursor입니다.
-                                if (_tableCursors.TryGetValue(tableInfo.TableName, out double cursor))
-                                {
-                                    startCursor = cursor;
-                                }
+                                var startCursor = _tableCursors.TryGetValue(tableInfo.TableName, out double cursor)
+                                    ? cursor
+                                    : double.MinValue; // 실시간에서 한 번도 읽지 못한 테이블의 s_time=0도 포함합니다.
 
                                 // 이미 최종 시간까지 읽었다면 건너뜁니다.
                                 if (startCursor >= finalEndTime) { continue; }
