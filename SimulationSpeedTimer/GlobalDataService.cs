@@ -648,10 +648,6 @@ namespace SimulationSpeedTimer
                     var dbMaxIncreased = maxDbTime > previousDbMax;
                     Debug.WriteLine($"[FinalDbMaxWait:Retry] Session={Id}, Attempt={attempt}/{_config.RetryCount}, LastSeen={lastSeenTime:F5}, DbMax={maxDbTime:F5}, LatestDbMax={nextDbMax:F5}, DbMaxIncreased={dbMaxIncreased}");
 
-                    if (maxDbTime >= lastSeenTime && !dbMaxIncreased)
-                    {
-                        break;
-                    }
                 }
 
                 Debug.WriteLine($"[FinalDbMaxWait:End] Session={Id}, LastSeen={lastSeenTime:F5}, DbMax={maxDbTime:F5}, ReachedLastSeen={maxDbTime >= lastSeenTime}");
