@@ -32,6 +32,12 @@ namespace SimulationSpeedTimer
         {
             public string DbPath { get; set; }
             public double QueryInterval { get; set; } = 1.0;
+
+            /// <summary>
+            /// 조회 경계의 부동소수점 오차를 보정하기 위한 허용 오차(초)입니다.
+            /// </summary>
+            public double BoundaryToleranceSeconds { get; set; } = 0.000001;
+
             public int RetryCount { get; set; } = 3;
             public int RetryIntervalMs { get; set; } = 10;
 
@@ -115,8 +121,6 @@ namespace SimulationSpeedTimer
             public Guid Id { get; }
             private readonly GlobalDataServiceConfig _config;
 
-            // [상수] 부동소수점 조회의 경계값을 포함하기 위한 마진 (1마이크로초)
-            private const double QueryMargin = 0.000001;
             private int _yieldCounter = 0;
 
             private Task _workerTask;
@@ -194,6 +198,16 @@ namespace SimulationSpeedTimer
 
                 try
                 {
+                    if (_config.QueryInterval <= 0)
+                    {
+                        throw new InvalidOperationException("[GlobalDataService] QueryInterval must be greater than zero.");
+                    }
+
+                    if (_config.BoundaryToleranceSeconds < 0)
+                    {
+                        throw new InvalidOperationException("[GlobalDataService] BoundaryToleranceSeconds must be greater than or equal to zero.");
+                    }
+
                     // 1. DB 연결 및 초기화
                     connection = WaitForConnection(token);
                     if (connection == null) return;
@@ -211,19 +225,21 @@ namespace SimulationSpeedTimer
                     Console.WriteLine($"[{Id}] Ready to process frames.");
 
                     // 3. 데이터 소비 루프
-                    double nextCheckpoint = _config.QueryInterval;
+                    decimal queryInterval = (decimal)_config.QueryInterval;
+                    decimal nextCheckpoint = queryInterval;
                     double lastQueryEndTime = 0.0;
                     double lastSeenTime = 0.0;
 
                     foreach (var time in _timeBuffer.GetConsumingEnumerable())
                     {
                         lastSeenTime = time;
+                        decimal currentTime = (decimal)time;
 
-                        if (time >= nextCheckpoint)
+                        if (currentTime >= nextCheckpoint)
                         {
                             // [수정] 이전 처리 종료 시점(lastQueryEndTime)부터 처리를 시작해야 중복/누락이 없음
                             double rangeStart = lastQueryEndTime;
-                            double rangeEnd = nextCheckpoint;
+                            double rangeEnd = (double)nextCheckpoint;
 
                             ProcessRange(connection, rangeStart, rangeEnd, token);
 
@@ -235,28 +251,28 @@ namespace SimulationSpeedTimer
                             // [루프 최적화: Fast-Forward]
                             // 데이터가 밀려서 수신된 시간(time)과 현재 처리 시점(nextCheckpoint)의 격차가 큰 경우,
                             // 루프를 돌지 않고 한 번에 처리(Range Query) 후 인덱스를 점프합니다.
-                            double gap = time - nextCheckpoint;
-                            if (gap > _config.QueryInterval) // 격차가 1 Interval보다 클 때만 수행
+                            decimal gap = currentTime - nextCheckpoint;
+                            if (gap > queryInterval) // 격차가 1 Interval보다 클 때만 수행
                             {
-                                // [수정] Fast-Forward 시, time 지점의 데이터도 포함해서 처리해야 하므로 Margin을 더해줍니다.
-                                // 또한 다음 Loop 시작점(lastQueryEndTime)도 이 Margin이 더해진 값이어야 중복 조회가 발생하지 않습니다.
-                                double safeEndTime = time + QueryMargin;
+                                // [수정] Fast-Forward 시, time 지점의 데이터도 포함해서 처리해야 하므로 허용 오차를 더해줍니다.
+                                // 또한 다음 Loop 시작점(lastQueryEndTime)도 이 허용 오차가 더해진 값이어야 중복 조회가 발생하지 않습니다.
+                                double safeEndTime = time + _config.BoundaryToleranceSeconds;
 
                                 // 점프할 구간의 데이터를 통째로 처리 (데이터 누락 방지)
-                                ProcessRange(connection, nextCheckpoint, safeEndTime, token);
+                                ProcessRange(connection, (double)nextCheckpoint, safeEndTime, token);
 
                                 // [수정] Fast-Forward로 처리된 구간까지 lastQueryEndTime 갱신 (중복 처리 방지)
                                 lastQueryEndTime = safeEndTime;
 
                                 // 인덱스 이동 (time 바로 다음 Interval로 맞춤)
                                 // 예: time=100.5, interval=0.5 -> nextCheckpoint를 101.0으로 설정
-                                int jumps = (int)Math.Floor((time - nextCheckpoint) / _config.QueryInterval) + 1;
-                                nextCheckpoint = Math.Round(nextCheckpoint + jumps * _config.QueryInterval, 1);
+                                int jumps = (int)decimal.Floor(gap / queryInterval) + 1;
+                                nextCheckpoint += queryInterval * jumps;
                             }
                             else
                             {
                                 // [정상 진행] 격차가 크지 않으면 다음 체크포인트로 1단계만 전진
-                                nextCheckpoint = Math.Round(nextCheckpoint + _config.QueryInterval, 1);
+                                nextCheckpoint += queryInterval;
                             }
 
                             if (++_yieldCounter % 50 == 0)
@@ -271,6 +287,11 @@ namespace SimulationSpeedTimer
                     // 4. 잔여 데이터 루프 (Graceful Shutdown)
                     // 테이블별 마지막 조회 시간부터 시뮬레이션 종료 시간까지 잔여 범위를 추가 조회합니다.
                     var finalEndTime = Math.Max(lastSeenTime, lastQueryEndTime);
+                    var maxDbTime = GetMaxTimeFromDB(connection);
+                    if (maxDbTime > finalEndTime)
+                    {
+                        finalEndTime = maxDbTime;
+                    }
 
                     if (_schema != null && _schema.Tables != null)
                     {
@@ -295,7 +316,7 @@ namespace SimulationSpeedTimer
                                     // 테이블 마지막 조회 시간부터 사용자 종료 시간까지 조회합니다.
                                     cmd.CommandText = $"SELECT * FROM {tableInfo.TableName} WHERE s_time > @start AND s_time <= @end";
                                     cmd.Parameters.AddWithValue("@start", startCursor);
-                                    cmd.Parameters.AddWithValue("@end", finalEndTime + QueryMargin);
+                                    cmd.Parameters.AddWithValue("@end", finalEndTime + _config.BoundaryToleranceSeconds);
 
                                     using (var reader = cmd.ExecuteReader())
                                     {
@@ -303,8 +324,8 @@ namespace SimulationSpeedTimer
                                         {
                                             double t = Convert.ToDouble(reader["s_time"]);
 
-                                            // QueryMargin으로 인해 종료 시간을 살짝 넘긴 데이터는 버립니다.
-                                            if (t > finalEndTime && t > finalEndTime + 0.000001) continue;
+                                            // 허용 오차로 인해 종료 시간을 살짝 넘긴 데이터는 버립니다.
+                                            if (t > finalEndTime + _config.BoundaryToleranceSeconds) continue;
 
                                             if (!residualChunk.TryGetValue(t, out var frame))
                                             {
@@ -348,7 +369,7 @@ namespace SimulationSpeedTimer
                         if (hasData)
                         {
                             SharedFrameRepository.Instance.StoreChunk(residualChunk, this.Id);
-                            Console.WriteLine($"[{Id}] Finalizing: Synced residual data up to {finalEndTime:F1} ({residualChunk.Count} frames).");
+                            Console.WriteLine($"[{Id}] Finalizing: Synced residual data up to {finalEndTime:F5} ({residualChunk.Count} frames).");
                         }
                     }
                 }
