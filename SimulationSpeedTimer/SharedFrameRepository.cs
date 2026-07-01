@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 
@@ -63,10 +64,12 @@ namespace SimulationSpeedTimer
         {
             if (chunk == null || chunk.Count == 0) return;
 
+            Debug.WriteLine($"[Repo:StoreStart] IncomingSession={sessionId}, CurrentSession={_currentSessionId}, ChunkCount={chunk.Count}");
+
             // 핵심: 세션 ID 검증 (이전 세션의 데이터가 늦게 도착하면 폐기)
             if (sessionId != _currentSessionId)
             {
-                // Console.WriteLine($"[SharedFrameRepository] Data rejected. Session mismatch. (Start:{sessionId} != Current:{_currentSessionId})");
+                Debug.WriteLine($"[Repo:RejectBeforeLock] IncomingSession={sessionId}, CurrentSession={_currentSessionId}, ChunkCount={chunk.Count}");
                 return;
             }
 
@@ -74,7 +77,11 @@ namespace SimulationSpeedTimer
             try
             {
                 // 재검증 (Lock 획득 사이 변경 가능성)
-                 if (sessionId != _currentSessionId) return;
+                 if (sessionId != _currentSessionId)
+                 {
+                     Debug.WriteLine($"[Repo:RejectInsideLock] IncomingSession={sessionId}, CurrentSession={_currentSessionId}, ChunkCount={chunk.Count}");
+                     return;
+                 }
 
                 foreach (var kvp in chunk)
                 {
@@ -84,6 +91,10 @@ namespace SimulationSpeedTimer
                 
                 // 슬라이딩 윈도우 적용 (오래된 데이터 제거)
                 CleanupOldFrames();
+                var rangeText = _timeIndex.Count == 0
+                    ? "empty"
+                    : $"{_timeIndex.Min:F5}..{_timeIndex.Max:F5}";
+                Debug.WriteLine($"[Repo:StoreDone] Session={sessionId}, ChunkCount={chunk.Count}, FrameCount={_frames.Count}, Range={rangeText}");
             }
             finally
             {
@@ -95,7 +106,9 @@ namespace SimulationSpeedTimer
             if (chunk.Count > 0)
             {
                 var sortedFrames = chunk.OrderBy(x => x.Key).Select(x => x.Value).ToList();
+                Debug.WriteLine($"[Repo:BeforeEvent] Session={sessionId}, EventSession={_currentSessionId}, FrameCount={sortedFrames.Count}");
                 OnFramesAdded?.Invoke(sortedFrames, _currentSessionId);
+                Debug.WriteLine($"[Repo:AfterEvent] Session={sessionId}, EventSession={_currentSessionId}, FrameCount={sortedFrames.Count}");
             }
         }
 

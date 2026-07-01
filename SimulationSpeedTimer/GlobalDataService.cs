@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -312,6 +313,8 @@ namespace SimulationSpeedTimer
 
                     if (_schema != null && _schema.Tables != null)
                     {
+                        Debug.WriteLine($"[FinalResidual:Start] Session={Id}, LastSeen={lastSeenTime:F5}, LastQueryEnd={lastQueryEndTime:F5}, DbMax={maxDbTime:F5}, FinalEnd={finalEndTime:F5}, TableCount={_schema.Tables.Count()}");
+
                         var residualChunk = new Dictionary<double, SimulationFrame>();
                         bool hasData = false;
 
@@ -322,9 +325,16 @@ namespace SimulationSpeedTimer
                                 var startCursor = _tableCursors.TryGetValue(tableInfo.TableName, out double cursor)
                                     ? cursor
                                     : double.MinValue; // 실시간에서 한 번도 읽지 못한 테이블의 s_time=0도 포함합니다.
+                                var tableMaxTime = GetMaxTimeForTable(connection, tableInfo.TableName);
+
+                                Debug.WriteLine($"[FinalResidual:TableStart] Session={Id}, Table={tableInfo.TableName}, Object={tableInfo.ObjectName}, Cursor={startCursor:F5}, TableMax={tableMaxTime:F5}, FinalEnd={finalEndTime:F5}, HasCursor={_tableCursors.ContainsKey(tableInfo.TableName)}");
 
                                 // 이미 최종 시간까지 읽었다면 건너뜁니다.
-                                if (startCursor >= finalEndTime) { continue; }
+                                if (startCursor >= finalEndTime)
+                                {
+                                    Debug.WriteLine($"[FinalResidual:Skip] Session={Id}, Table={tableInfo.TableName}, Cursor={startCursor:F5}, TableMax={tableMaxTime:F5}, FinalEnd={finalEndTime:F5}");
+                                    continue;
+                                }
 
                                 using (var cmd = connection.CreateCommand())
                                 {
@@ -332,6 +342,10 @@ namespace SimulationSpeedTimer
                                     cmd.CommandText = $"SELECT * FROM {tableInfo.TableName} WHERE s_time > @start AND s_time <= @end";
                                     cmd.Parameters.AddWithValue("@start", startCursor);
                                     cmd.Parameters.AddWithValue("@end", finalEndTime + _config.BoundaryToleranceSeconds);
+
+                                    int residualRows = 0;
+                                    double minReadTime = double.MaxValue;
+                                    double maxReadTime = double.MinValue;
 
                                     using (var reader = cmd.ExecuteReader())
                                     {
@@ -341,6 +355,10 @@ namespace SimulationSpeedTimer
 
                                             // 허용 오차로 인해 종료 시간을 살짝 넘긴 데이터는 버립니다.
                                             if (t > finalEndTime + _config.BoundaryToleranceSeconds) continue;
+
+                                            residualRows++;
+                                            if (t < minReadTime) minReadTime = t;
+                                            if (t > maxReadTime) maxReadTime = t;
 
                                             if (!residualChunk.TryGetValue(t, out var frame))
                                             {
@@ -376,14 +394,22 @@ namespace SimulationSpeedTimer
                                             hasData = true;
                                         }
                                     }
+
+                                    Debug.WriteLine($"[FinalResidual:TableRead] Session={Id}, Table={tableInfo.TableName}, Rows={residualRows}, MinRead={(residualRows > 0 ? minReadTime.ToString("F5") : "none")}, MaxRead={(residualRows > 0 ? maxReadTime.ToString("F5") : "none")}, Cursor={startCursor:F5}, TableMax={tableMaxTime:F5}, FinalEnd={finalEndTime:F5}");
                                 }
                             }
-                            catch { /* 테이블 조회 실패 무시 */ }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"[FinalResidual:Error] Session={Id}, Table={tableInfo.TableName}, Error={ex}");
+                            }
                         }
+
+                        Debug.WriteLine($"[FinalResidual:BeforeStore] Session={Id}, HasData={hasData}, FrameCount={residualChunk.Count}, FinalEnd={finalEndTime:F5}");
 
                         if (hasData)
                         {
                             SharedFrameRepository.Instance.StoreChunk(residualChunk, this.Id);
+                            Debug.WriteLine($"[FinalResidual:AfterStore] Session={Id}, FrameCount={residualChunk.Count}, FinalEnd={finalEndTime:F5}");
                             Console.WriteLine($"[{Id}] Finalizing: Synced residual data up to {finalEndTime:F5} ({residualChunk.Count} frames).");
                         }
                     }
@@ -433,17 +459,25 @@ namespace SimulationSpeedTimer
 
             private void ProcessRange(SQLiteConnection conn, double start, double end, CancellationToken token)
             {
+                Debug.WriteLine($"[ProcessRange:Start] Session={Id}, Start={start:F5}, End={end:F5}, TokenCanceled={token.IsCancellationRequested}");
+
                 var chunk = FetchAllTablesRangeWithRetry(conn, start, end, token);
+
+                Debug.WriteLine($"[ProcessRange:Fetched] Session={Id}, Start={start:F5}, End={end:F5}, ChunkCount={(chunk == null ? -1 : chunk.Count)}, TokenCanceled={token.IsCancellationRequested}");
 
                 if (chunk == null || chunk.Count == 0)
                 {
                     chunk = new Dictionary<double, SimulationFrame>();
                     // 데이터가 없더라도 빈 프레임 생성 (타임스탬프 동기화)
                     chunk[end] = new SimulationFrame(end);
+                    Debug.WriteLine($"[ProcessRange:DummyFrame] Session={Id}, Time={end:F5}");
                 }
 
+                Debug.WriteLine($"[ProcessRange:BeforeStore] Session={Id}, Start={start:F5}, End={end:F5}, ChunkCount={chunk.Count}, TokenCanceled={token.IsCancellationRequested}");
                 SharedFrameRepository.Instance.StoreChunk(chunk, this.Id);
+                Debug.WriteLine($"[ProcessRange:AfterStore] Session={Id}, Start={start:F5}, End={end:F5}, ChunkCount={chunk.Count}, TokenCanceled={token.IsCancellationRequested}");
                 OnChunkProcessed?.Invoke(chunk);
+                Debug.WriteLine($"[ProcessRange:AfterEvent] Session={Id}, Start={start:F5}, End={end:F5}, ChunkCount={chunk.Count}, TokenCanceled={token.IsCancellationRequested}");
             }
 
             private Dictionary<double, SimulationFrame> FetchAllTablesRangeWithRetry(SQLiteConnection conn, double start, double end, CancellationToken token)
@@ -454,7 +488,11 @@ namespace SimulationSpeedTimer
                 while (attemptCount < maxAttempts && !token.IsCancellationRequested)
                 {
                     attemptCount++;
+                    Debug.WriteLine($"[FetchRetry:Attempt] Session={Id}, Attempt={attemptCount}/{maxAttempts}, Start={start:F5}, End={end:F5}, TokenCanceled={token.IsCancellationRequested}");
+
                     var result = FetchAllTablesRange(conn, start, end);
+
+                    Debug.WriteLine($"[FetchRetry:Result] Session={Id}, Attempt={attemptCount}/{maxAttempts}, Start={start:F5}, End={end:F5}, Count={(result == null ? -1 : result.Count)}, TokenCanceled={token.IsCancellationRequested}");
 
                     if (result != null && result.Count > 0)
                     {
@@ -463,13 +501,19 @@ namespace SimulationSpeedTimer
 
                     // Fast-Fail
                     double maxTime = GetMaxTimeFromDB(conn);
-                    if (maxTime >= end) return result;
+                    if (maxTime >= end)
+                    {
+                        Debug.WriteLine($"[FetchRetry:FastFail] Session={Id}, Attempt={attemptCount}/{maxAttempts}, Start={start:F5}, End={end:F5}, DbMax={maxTime:F5}");
+                        return result;
+                    }
 
                     if (attemptCount < maxAttempts)
                     {
+                        Debug.WriteLine($"[FetchRetry:Sleep] Session={Id}, Attempt={attemptCount}/{maxAttempts}, RetryIntervalMs={_config.RetryIntervalMs}");
                         Thread.Sleep(_config.RetryIntervalMs);
                     }
                 }
+                Debug.WriteLine($"[FetchRetry:ExitEmpty] Session={Id}, Start={start:F5}, End={end:F5}, TokenCanceled={token.IsCancellationRequested}");
                 return new Dictionary<double, SimulationFrame>();
             }
 
@@ -489,11 +533,22 @@ namespace SimulationSpeedTimer
                             cmd.Parameters.AddWithValue("@start", start);
                             cmd.Parameters.AddWithValue("@end", end);
 
+                            double cursorBefore = _tableCursors.TryGetValue(tableInfo.TableName, out double currentCursor)
+                                ? currentCursor
+                                : double.MinValue;
+                            int tableRows = 0;
+                            double minReadTime = double.MaxValue;
+                            double maxReadTime = double.MinValue;
+
                             using (var reader = cmd.ExecuteReader())
                             {
                                 while (reader.Read())
                                 {
                                     double t = Convert.ToDouble(reader["s_time"]);
+                                    tableRows++;
+                                    if (t < minReadTime) minReadTime = t;
+                                    if (t > maxReadTime) maxReadTime = t;
+
                                     if (!_tableCursors.TryGetValue(tableInfo.TableName, out double cursor) || t > cursor)
                                     {
                                         _tableCursors[tableInfo.TableName] = t;
@@ -530,11 +585,41 @@ namespace SimulationSpeedTimer
                                     frame.AddOrUpdateTable(tableData);
                                 }
                             }
+
+                            double cursorAfter = _tableCursors.TryGetValue(tableInfo.TableName, out double updatedCursor)
+                                ? updatedCursor
+                                : double.MinValue;
+                            Debug.WriteLine($"[FetchTable:Read] Session={Id}, Table={tableInfo.TableName}, Object={tableInfo.ObjectName}, Start={start:F5}, End={end:F5}, Rows={tableRows}, MinRead={(tableRows > 0 ? minReadTime.ToString("F5") : "none")}, MaxRead={(tableRows > 0 ? maxReadTime.ToString("F5") : "none")}, CursorBefore={cursorBefore:F5}, CursorAfter={cursorAfter:F5}");
                         }
                     }
-                    catch { /* 쿼리 오류 무시 */ }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[FetchTable:Error] Session={Id}, Table={tableInfo.TableName}, Start={start:F5}, End={end:F5}, Error={ex}");
+                    }
                 }
                 return chunk;
+            }
+
+            private double GetMaxTimeForTable(SQLiteConnection conn, string tableName)
+            {
+                try
+                {
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = $"SELECT MAX(s_time) FROM {tableName}";
+                        var result = cmd.ExecuteScalar();
+                        if (result != null && result != DBNull.Value)
+                        {
+                            return Convert.ToDouble(result);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[GetMaxTimeForTable:Error] Session={Id}, Table={tableName}, Error={ex}");
+                }
+
+                return -1.0;
             }
 
             private double GetMaxTimeFromDB(SQLiteConnection conn)
