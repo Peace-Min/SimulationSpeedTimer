@@ -75,11 +75,8 @@ namespace SimulationSpeedTimer
 
         private void OnSessionStopped()
         {
-            // 동적 구독 해제
-            SharedFrameRepository.Instance.OnFramesAdded -= HandleNewFrames;
-            Console.WriteLine("[SimulationController] Session Stopped. Detached from Repository.");
-            _currentSessionId = Guid.Empty;
-            // 필요한 경우 내부 자원 정리
+            // Keep the current session subscription and ID until the next session starts.
+            // DataSession can publish its final sweep after the stop notification.
         }
 
         private void HandleNewFrames(List<SimulationFrame> frames, Guid sessionId)
